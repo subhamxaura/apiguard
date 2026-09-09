@@ -1,0 +1,78 @@
+{
+  "name": "apiguard",
+  "version": "0.0.0",
+  "description": "Detect breaking changes between OpenAPI specifications (3.0 & 3.1) so API contracts never silently break downstream consumers.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apiguard/apiguard.git"
+  },
+  "bin": {
+    "apiguard": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js",
+      "require": "./dist/cli.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:action": "esbuild src/github/action-entry.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:electron --minify",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "coverage": "vitest run --coverage",
+    "docs:rules": "tsx scripts/generate-rules-docs.ts",
+    "bench": "tsx scripts/bench.ts",
+    "gen-fixtures": "tsx scripts/gen-fixtures.ts"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.1",
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "commander": "^14.0.2",
+    "micromatch": "^4.0.8",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/micromatch": "^4.0.10",
+    "@types/node": "^24.9.1",
+    "@vitest/coverage-v8": "^4.0.3",
+    "esbuild": "^0.27.0",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vitest": "^4.0.3"
+  }
+}

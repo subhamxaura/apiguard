@@ -43,3 +43,15 @@ Every non-obvious decision, its reason, and date. Newest entries last per milest
   94.06% stmts / 96.7% lines / 96.68% funcs / 85.07% branches (all ≥ thresholds). Fixed 4 real
   engine bugs surfaced by the coverage push (parameter keying, doctrine wiring, compact crash,
   scope-satisfaction direction).
+
+## M4 — Semver, Markdown, Docs Tooling
+
+- **docs/rules.md is generated, with a parity test** (2026-09-10): the per-rule reference is
+  emitted from the registry by `pnpm docs:rules`; a unit test fails CI if docs drift or a rule
+  is added without regenerating (§23 registry-parity).
+- **Perf gate is `pnpm bench` with generous CI budgets** (2026-09-10): 200-op × 40-prop diff
+  ≤ 20s, 2000-property schema ≤ 15s, plus an id-sequence determinism check. Observed: ~0.7s and
+  ~0.3s locally — budgets leave 20× headroom for shared runners.
+- **Status note (3 lines):** semver advisor (§16), markdown reporter (§15.2), flag semantics
+  (§13) all covered by tests from M3. Added docs:rules generator + parity test, bench perf
+  gate. 293 tests, coverage 94.1/96.7/96.7/85.1 — all gates green.

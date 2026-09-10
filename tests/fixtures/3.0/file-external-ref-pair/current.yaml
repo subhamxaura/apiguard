@@ -1,0 +1,16 @@
+# Fixture: external-file $ref (denied in v1 — expect exit 3)
+openapi: 3.0.3
+info:
+  title: Petstore API
+  version: 1.0.0
+paths:
+  /shared:
+    get:
+      operationId: getShared
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: 'common.yaml#/components/schemas/Shared'

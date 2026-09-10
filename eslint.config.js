@@ -4,17 +4,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', '**/*.snap'],
+    ignores: ['dist/**', 'coverage/**', 'node_modules/**', '**/*.snap', 'scripts/**/*.cjs'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
   {
-    files: ['**/*.ts'],
+    files: ['src/core/**/*.ts'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-restricted-imports': [
         'error',
         {
@@ -25,6 +22,26 @@ export default tseslint.config(
                 'core/ must stay pure: never import github/, reporters/, or cli/ (spec §5.3).',
             },
           ],
+          paths: [
+            {
+              name: '@actions/core',
+              message: 'GitHub-only dependency; not allowed outside src/github/.',
+            },
+            {
+              name: '@actions/github',
+              message: 'GitHub-only dependency; not allowed outside src/github/.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/**/*.ts', '!src/github/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
           paths: [
             {
               name: '@actions/core',

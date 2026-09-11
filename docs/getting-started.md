@@ -42,11 +42,11 @@ The diff exits `1` when any breaking change exists (tune with `--fail-on`).
 
 ## 4. Pick your workflow
 
-| You are... | Use |
-|---|---|
-| A repo with an API spec in git | The [GitHub Action](github-action.md) — baseline is automatic |
-| A CI without GitHub | The CLI: keep the last-released spec as `baseline.yaml` and diff against it |
-| An SDK/codegen maintainer | The [library](library.md) — gate publishes on `report.semver.bump` |
+| You are...                     | Use                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| A repo with an API spec in git | The [GitHub Action](github-action.md) — baseline is automatic               |
+| A CI without GitHub            | The CLI: keep the last-released spec as `baseline.yaml` and diff against it |
+| An SDK/codegen maintainer      | The [library](library.md) — gate publishes on `report.semver.bump`          |
 
 ## 5. Tune noise
 

@@ -47,7 +47,9 @@ components:
     const r = sem(doc);
     const msgs = r.issues.map((i) => i.message);
     expect(msgs.some((m) => m.includes('invalid response status key "999"'))).toBe(true);
-    expect(r.issues.filter((i) => i.message.includes('invalid response status key'))).toHaveLength(1);
+    expect(r.issues.filter((i) => i.message.includes('invalid response status key'))).toHaveLength(
+      1,
+    );
   });
 
   it('flags empty path items and path items without operations', () => {

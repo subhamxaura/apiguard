@@ -118,9 +118,15 @@ describe('compareChanges total ordering (§5.2)', () => {
         id,
         location: { ...change({}).location, pointerOld: oldPtr, pointerNew: newPtr },
       });
-    expect(compareChanges(withPointer('#/a', '#/a', 'r', 'i1'), withPointer('#/b', '#/b', 'r', 'i1'))).toBeLessThan(0);
-    expect(compareChanges(withPointer('#/a', '#/a', 'r1', 'i1'), withPointer('#/a', '#/a', 'r2', 'i1'))).toBeLessThan(0);
-    expect(compareChanges(withPointer('#/a', '#/a', 'r', 'i1'), withPointer('#/a', '#/a', 'r', 'i2'))).not.toBe(0);
+    expect(
+      compareChanges(withPointer('#/a', '#/a', 'r', 'i1'), withPointer('#/b', '#/b', 'r', 'i1')),
+    ).toBeLessThan(0);
+    expect(
+      compareChanges(withPointer('#/a', '#/a', 'r1', 'i1'), withPointer('#/a', '#/a', 'r2', 'i1')),
+    ).toBeLessThan(0);
+    expect(
+      compareChanges(withPointer('#/a', '#/a', 'r', 'i1'), withPointer('#/a', '#/a', 'r', 'i2')),
+    ).not.toBe(0);
     // pointerNew tie-break fires when pointerOld equal
     expect(
       compareChanges(withPointer('#/a', '#/a', 'r', 'i1'), withPointer('#/a', '#/b', 'r', 'i1')),

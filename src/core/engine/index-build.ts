@@ -88,9 +88,7 @@ export function mergedParameters(pathItem: JsonObject, operation: JsonObject): J
 
 function paramList(v: unknown): JsonObject[] {
   if (!Array.isArray(v)) return [];
-  return v.filter(
-    (x): x is JsonObject => x !== null && typeof x === 'object' && !Array.isArray(x),
-  );
+  return v.filter((x): x is JsonObject => x !== null && typeof x === 'object' && !Array.isArray(x));
 }
 
 function paramKey(p: JsonObject): string {

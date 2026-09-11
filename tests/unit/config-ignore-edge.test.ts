@@ -34,13 +34,18 @@ function tmpFile(name: string, body: string): string {
 
 describe('config loader branches', () => {
   it('loads JSON configs (.json extension branch)', () => {
-    const p = tmpFile('apiguard.json', JSON.stringify({ schemaVersion: 1, rules: { 'title-changed': 'off' } }));
+    const p = tmpFile(
+      'apiguard.json',
+      JSON.stringify({ schemaVersion: 1, rules: { 'title-changed': 'off' } }),
+    );
     const loaded = loadConfigFrom(p);
     expect(loaded.config.rules['title-changed']).toBe('off');
     expect(loaded.sourcePath).toBe(p);
   });
   it('throws ConfigError for missing explicit file', () => {
-    expect(() => loadConfigFrom(path.join(os.tmpdir(), 'nope-9x.yaml'))).toThrow(/config file not found/);
+    expect(() => loadConfigFrom(path.join(os.tmpdir(), 'nope-9x.yaml'))).toThrow(
+      /config file not found/,
+    );
   });
   it('throws ConfigError for invalid YAML/JSON', () => {
     const p = tmpFile('bad.yaml', 'rules: [unclosed');
@@ -109,10 +114,11 @@ function change(over: Partial<ApiChange['location']> & { ruleId?: string }): Api
   } as ApiChange;
 }
 
-const cfg = (ignore: object) => ({
-  ...DEFAULT_CONFIG,
-  ignore: { ...DEFAULT_CONFIG.ignore, ...ignore },
-}) as typeof DEFAULT_CONFIG;
+const cfg = (ignore: object) =>
+  ({
+    ...DEFAULT_CONFIG,
+    ignore: { ...DEFAULT_CONFIG.ignore, ...ignore },
+  }) as typeof DEFAULT_CONFIG;
 
 describe('parseOperationKey', () => {
   it('parses METHOD + path, uppercases the method, rejects garbage', () => {
@@ -137,7 +143,12 @@ describe('isIgnored branch matrix (§14.3)', () => {
   it('schemas: pointer with leading #/ and nested prefixes', () => {
     const c = cfg({ schemas: ['V1*'] });
     expect(isIgnored(change({ pointerNew: '#/components/schemas/V1Legacy' }), c)).toBe(true);
-    expect(isIgnored(change({ pointerOld: '#/paths/~1users/get/responses/200/content/~1appl/json/schema' }), c)).toBe(false);
+    expect(
+      isIgnored(
+        change({ pointerOld: '#/paths/~1users/get/responses/200/content/~1appl/json/schema' }),
+        c,
+      ),
+    ).toBe(false);
   });
   it('operations: exact METHOD + path match', () => {
     const c = cfg({ operations: ['GET /users'] });

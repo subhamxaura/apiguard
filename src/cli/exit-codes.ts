@@ -1,9 +1,5 @@
 /** Exit-code routing per spec §17. Everything routes through run(). */
-import {
-  ApiguardError,
-  ExitCode,
-  errorMessage,
-} from '../utils/errors.js';
+import { ApiguardError, ExitCode, errorMessage } from '../utils/errors.js';
 
 export { ExitCode };
 

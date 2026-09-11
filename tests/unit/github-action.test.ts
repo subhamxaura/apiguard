@@ -44,7 +44,11 @@ describe('resolveBaseline', () => {
     const dir = initRepo();
     const base = path.join(dir, 'base.yaml');
     fs.writeFileSync(base, SPEC);
-    const r = resolveBaseline({ baseline: base, current: path.join(dir, 'openapi.yaml'), cwd: dir });
+    const r = resolveBaseline({
+      baseline: base,
+      current: path.join(dir, 'openapi.yaml'),
+      cwd: dir,
+    });
     expect(r.via).toBe('input');
     expect(r.path).toBe(path.resolve(base));
   });
@@ -93,11 +97,14 @@ describe('renderComment', () => {
     const { analyze } = await import('../../src/core/engine/analyze.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apiguard-cmt-'));
     tmpDirs.push(dir);
-    const oldY = `${SPEC.replace('1.0', '1.0').replace('paths: {}', `paths:
+    const oldY = `${SPEC.replace('1.0', '1.0').replace(
+      'paths: {}',
+      `paths:
   /users/{id}:
     get:
       responses:
-        '200': { description: ok }`)}`;
+        '200': { description: ok }`,
+    )}`;
     const newY = oldY.replace("'200': { description: ok }", '');
     fs.writeFileSync(path.join(dir, 'old.yaml'), oldY);
     fs.writeFileSync(path.join(dir, 'new.yaml'), newY);
@@ -156,11 +163,17 @@ describe('runAction (fake core)', () => {
       info: () => {},
       setFailed: () => {},
     };
-    fs.writeFileSync(path.join(dir, 'base.yaml'), SPEC.replace('paths: {}', `paths:
+    fs.writeFileSync(
+      path.join(dir, 'base.yaml'),
+      SPEC.replace(
+        'paths: {}',
+        `paths:
   /users:
     get:
       responses:
-        '200': { description: ok }`));
+        '200': { description: ok }`,
+      ),
+    );
     const result = await runAction({
       core: fakeCore as never,
       cwd: dir,
@@ -178,11 +191,14 @@ describe('runAction (fake core)', () => {
     fs.writeFileSync(path.join(dir, 'openapi.yaml'), SPEC);
     fs.writeFileSync(
       path.join(dir, 'base.yaml'),
-      SPEC.replace('paths: {}', `paths:
+      SPEC.replace(
+        'paths: {}',
+        `paths:
   /users:
     get:
       responses:
-        '200': { description: ok }`),
+        '200': { description: ok }`,
+      ),
     );
     const fakeCore = {
       getInput: (name: string) =>

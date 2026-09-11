@@ -8,7 +8,9 @@ describe('canonicalize / sha256 (§8/§12)', () => {
   });
 
   it('handles nested structures and arrays (order-preserving)', () => {
-    expect(canonicalize({ x: [3, 1, 2], y: { d: 4, c: 3 } })).toBe('{"x":[3,1,2],"y":{"c":3,"d":4}}');
+    expect(canonicalize({ x: [3, 1, 2], y: { d: 4, c: 3 } })).toBe(
+      '{"x":[3,1,2],"y":{"c":3,"d":4}}',
+    );
   });
 
   it('stable ids across key shuffles', () => {

@@ -3,11 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { ZodError } from 'zod';
-import {
-  configSchema,
-  type ParsedFileConfig,
-  type ResolvedConfig,
-} from './schema.js';
+import { configSchema, type ParsedFileConfig, type ResolvedConfig } from './schema.js';
 import { DEFAULT_CONFIG } from './defaults.js';
 import { ConfigError, errorMessage } from '../../utils/errors.js';
 
@@ -139,11 +135,13 @@ export function loadConfigFrom(explicitPath: string): LoadedConfig {
 }
 
 /** Discover config per §14.1; returns defaults when nothing is found. */
-export function discoverAndLoadConfig(opts: {
-  explicit?: string;
-  env?: string;
-  cwd?: string;
-} = {}): LoadedConfig {
+export function discoverAndLoadConfig(
+  opts: {
+    explicit?: string;
+    env?: string;
+    cwd?: string;
+  } = {},
+): LoadedConfig {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.explicit || opts.env) {
     const target = opts.explicit ?? opts.env ?? '';

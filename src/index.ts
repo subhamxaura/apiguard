@@ -5,11 +5,7 @@ import { validateSemantics, type ValidationResult } from './loaders/validate.js'
 import type { NormalizedSpec } from './core/models/types.js';
 
 export { analyze, type AnalyzeOptions, type AnalyzeResult };
-export {
-  discoverAndLoadConfig,
-  loadConfigFrom,
-  type LoadedConfig,
-} from './core/config/index.js';
+export { discoverAndLoadConfig, loadConfigFrom, type LoadedConfig } from './core/config/index.js';
 export { suggestVersion } from './core/versioning/semver-advisor.js';
 export type {
   ApiChange,

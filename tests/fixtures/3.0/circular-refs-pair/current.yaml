@@ -78,4 +78,3 @@ components:
           $ref: '#/components/schemas/Node'
         label:
           type: string
-

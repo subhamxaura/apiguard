@@ -1,6 +1,12 @@
 /** Unit tests for the shared comparator helpers (§11.3). */
 import { describe, it, expect } from 'vitest';
-import { deepEqual, isObject, typeLabel, num, boundDirection } from '../../src/core/engine/comparator.js';
+import {
+  deepEqual,
+  isObject,
+  typeLabel,
+  num,
+  boundDirection,
+} from '../../src/core/engine/comparator.js';
 
 describe('comparator helpers', () => {
   it('deepEqual: primitives, arrays, objects', () => {

@@ -45,7 +45,9 @@ describe('buildSpecIndex branches (§9)', () => {
 
   it('tolerates null documents and null method maps', () => {
     expect(buildSpecIndex(null).paths).toEqual([]);
-    expect(buildSpecIndex({ paths: null, components: null, webhooks: null }).operations).toEqual([]);
+    expect(buildSpecIndex({ paths: null, components: null, webhooks: null }).operations).toEqual(
+      [],
+    );
   });
 
   it('sorts methods by METHOD_RANK and ignores non-method keys', () => {

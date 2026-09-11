@@ -37,7 +37,10 @@ const OP = `paths:
 
 describe('document-level rules (§10.1)', () => {
   it('title-changed fires when info.title differs', async () => {
-    const [o, n] = pair(`openapi: 3.0.3\ninfo: {title: API, version: '1.0'}\n${OP}`, `openapi: 3.0.3\ninfo: {title: Renamed API, version: '1.0'}\n${OP}`);
+    const [o, n] = pair(
+      `openapi: 3.0.3\ninfo: {title: API, version: '1.0'}\n${OP}`,
+      `openapi: 3.0.3\ninfo: {title: Renamed API, version: '1.0'}\n${OP}`,
+    );
     const { report } = await analyze(o, n, {});
     const hit = report.changes.find((c) => c.ruleId === 'title-changed');
     expect(hit).toBeDefined();
@@ -110,8 +113,14 @@ describe('oauth flow scope rules (§10.6)', () => {
     // remove the scheme definition entirely in both docs so nothing references it, but then
     // no scope diff exists. Instead: keep scopes in old, drop scheme in new is scheme-removed.
     // The downgrade path is covered via the components context (no operation references).
-    const o2 = o.replace('tokenUrl: https://auth.example.com/token\n', 'tokenUrl: https://auth.example.com/token\n    x-unused: true\n');
-    const n2 = n.replace('tokenUrl: https://auth.example.com/token\n', 'tokenUrl: https://auth.example.com/token\n    x-unused: true\n');
+    const o2 = o.replace(
+      'tokenUrl: https://auth.example.com/token\n',
+      'tokenUrl: https://auth.example.com/token\n    x-unused: true\n',
+    );
+    const n2 = n.replace(
+      'tokenUrl: https://auth.example.com/token\n',
+      'tokenUrl: https://auth.example.com/token\n    x-unused: true\n',
+    );
     const { report } = await analyze(o2, n2, {});
     const removed = report.changes.find((c) => c.ruleId === 'oauth-scope-removed');
     expect(removed).toBeDefined();

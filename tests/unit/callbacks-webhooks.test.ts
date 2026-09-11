@@ -60,10 +60,14 @@ describe('§10.2 callbacks & webhooks', () => {
 `;
     const [o1, n1] = pair(DOC('3.1.0', without), DOC('3.1.0', withWh));
     const { report } = await analyze(o1, n1, {});
-    expect(report.changes.some((c) => c.ruleId === 'webhook-added' && c.severity === 'info')).toBe(true);
+    expect(report.changes.some((c) => c.ruleId === 'webhook-added' && c.severity === 'info')).toBe(
+      true,
+    );
 
     const [o2, n2] = pair(DOC('3.1.0', withWh), DOC('3.1.0', without));
     const { report: r2 } = await analyze(o2, n2, {});
-    expect(r2.changes.some((c) => c.ruleId === 'webhook-removed' && c.severity === 'error')).toBe(true);
+    expect(r2.changes.some((c) => c.ruleId === 'webhook-removed' && c.severity === 'error')).toBe(
+      true,
+    );
   });
 });

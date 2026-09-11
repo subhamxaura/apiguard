@@ -88,7 +88,8 @@ export function renderTerminal(report: DiffReport, options: RenderOptions): stri
     const verdict = '❌ Breaking API changes found';
     lines.push(options.color ? ANSI.red(ANSI.bold(verdict)) : verdict);
   } else {
-    const suffix = infoCount > 0 ? ` (${infoCount} informational change${infoCount === 1 ? '' : 's'})` : '';
+    const suffix =
+      infoCount > 0 ? ` (${infoCount} informational change${infoCount === 1 ? '' : 's'})` : '';
     const verdict = `✓ No breaking API changes found${suffix}`;
     lines.push(options.color ? ANSI.green(verdict) : verdict);
   }

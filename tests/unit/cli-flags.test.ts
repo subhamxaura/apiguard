@@ -42,7 +42,13 @@ describe('diff flag semantics (§13)', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), BASE);
     fs.writeFileSync(path.join(d, 'b.yaml'), CURRENT);
-    const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--markdown', '--include-non-breaking']);
+    const io = ioFor([
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--markdown',
+      '--include-non-breaking',
+    ]);
     const code = await run(io);
     expect(code).toBe(0);
     expect(io.out.join('\n')).toContain('## ✅ API Guard');
@@ -55,8 +61,13 @@ describe('diff flag semantics (§13)', () => {
     fs.writeFileSync(path.join(d, 'b.yaml'), CURRENT);
     const outPath = path.join(d, 'report.md');
     const io = ioFor([
-      'diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'),
-      '--markdown', '--output', outPath, '--include-non-breaking',
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--markdown',
+      '--output',
+      outPath,
+      '--include-non-breaking',
     ]);
     await run(io);
     expect(fs.existsSync(outPath)).toBe(true);
@@ -68,7 +79,13 @@ describe('diff flag semantics (§13)', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), BASE);
     fs.writeFileSync(path.join(d, 'b.yaml'), CURRENT);
-    const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--quiet', '--no-color']);
+    const io = ioFor([
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--quiet',
+      '--no-color',
+    ]);
     const code = await run(io);
     expect(code).toBe(0);
     const out = io.out.join('\n').trim();
@@ -81,7 +98,13 @@ describe('diff flag semantics (§13)', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), BASE);
     fs.writeFileSync(path.join(d, 'b.yaml'), CURRENT);
-    const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--suggest-version', '--no-color']);
+    const io = ioFor([
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--suggest-version',
+      '--no-color',
+    ]);
     await run(io);
     expect(io.out.join('\n')).toContain('Suggested version bump:');
     fs.rmSync(d, { recursive: true, force: true });
@@ -91,7 +114,13 @@ describe('diff flag semantics (§13)', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), BASE);
     fs.writeFileSync(path.join(d, 'b.yaml'), CURRENT);
-    const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--strict', '--no-color']);
+    const io = ioFor([
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--strict',
+      '--no-color',
+    ]);
     await run(io);
     expect(io.out.join('\n')).toContain('INFO');
     fs.rmSync(d, { recursive: true, force: true });
@@ -100,8 +129,18 @@ describe('diff flag semantics (§13)', () => {
   it('--fail-on never exits 0 even with breaking changes', async () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), BASE);
-    fs.writeFileSync(path.join(d, 'b.yaml'), BASE.replace("'200': {description: OK}", 'responses: {}'));
-    const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--fail-on', 'never', '--no-color']);
+    fs.writeFileSync(
+      path.join(d, 'b.yaml'),
+      BASE.replace("'200': {description: OK}", 'responses: {}'),
+    );
+    const io = ioFor([
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--fail-on',
+      'never',
+      '--no-color',
+    ]);
     const code = await run(io);
     expect(code).toBe(0);
     fs.rmSync(d, { recursive: true, force: true });

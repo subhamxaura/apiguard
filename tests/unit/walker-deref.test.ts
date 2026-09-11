@@ -123,7 +123,9 @@ describe('buildSpecIndex (§7 index stage)', () => {
   });
 
   it('malformed path items are skipped, not fatal', () => {
-    const idx = buildSpecIndex({ paths: { '/bad': 'not-an-object', '/ok': { get: { responses: {} } } } });
+    const idx = buildSpecIndex({
+      paths: { '/bad': 'not-an-object', '/ok': { get: { responses: {} } } },
+    });
     expect(idx.paths).toContain('/ok');
   });
 });

@@ -21,9 +21,7 @@ function asObject(v: unknown): JsonObject | undefined {
 
 function asRecordArray(v: unknown): JsonObject[] {
   if (!Array.isArray(v)) return [];
-  return v.filter(
-    (x): x is JsonObject => x !== null && typeof x === 'object' && !Array.isArray(x),
-  );
+  return v.filter((x): x is JsonObject => x !== null && typeof x === 'object' && !Array.isArray(x));
 }
 
 /**
@@ -33,7 +31,8 @@ function asRecordArray(v: unknown): JsonObject[] {
 export function validateSemantics(document: unknown, file: string): ValidationResult {
   const issues: ValidationIssue[] = [];
   const doc = asObject(document);
-  if (!doc) return { issues: [{ level: 'error', file, message: 'document is not an object' }], ok: false };
+  if (!doc)
+    return { issues: [{ level: 'error', file, message: 'document is not an object' }], ok: false };
 
   // --- unknown security-scheme references
   const schemes = asObject(doc.components)?.securitySchemes;

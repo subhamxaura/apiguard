@@ -141,16 +141,21 @@ ${components(schemas)}`;
 
 // ---- standard document builders ----
 
-const stdSchemas = (overrides: {
-  userProps?: string;
-  userRequired?: string[];
-  userInput?: string;
-  userList?: string;
-  extra?: string[];
-} = {}) => {
+const stdSchemas = (
+  overrides: {
+    userProps?: string;
+    userRequired?: string[];
+    userInput?: string;
+    userList?: string;
+    extra?: string[];
+  } = {},
+) => {
   const list: string[] = [];
-  list.push(SCHEMA_USER(overrides.userProps ?? USER_PROPS_STD, overrides.userRequired ?? ['id', 'name']));
-  if (overrides.userInput !== null) list.push(SCHEMA_USER_INPUT(overrides.userInput ?? USER_INPUT_STD));
+  list.push(
+    SCHEMA_USER(overrides.userProps ?? USER_PROPS_STD, overrides.userRequired ?? ['id', 'name']),
+  );
+  if (overrides.userInput !== null)
+    list.push(SCHEMA_USER_INPUT(overrides.userInput ?? USER_INPUT_STD));
   if (overrides.userList !== null) list.push(SCHEMA_USER_LIST(overrides.userList ?? USER_LIST_STD));
   list.push(SCHEMA_ERROR);
   if (overrides.extra) list.push(...overrides.extra);
@@ -226,95 +231,209 @@ const CASES: Pair[] = [
     name: 'operationid-changed',
     note: 'operationId changed; expect: no breaking (operation-id-changed warning)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace('operationId: listUsers', 'operationId: listUsersV2'), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace('operationId: listUsers', 'operationId: listUsersV2'),
+      stdSchemas(),
+    ),
   },
   {
     name: 'required-request-property-added',
     note: 'required request property added; expect: BREAKING (required-property-added error, send side)',
     baseline: BASE_BOTH('3.0.3'),
-    current: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      required:\n        - handle\n      properties:\n        handle:\n          type: string\n`,
-    })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      required:\n        - handle\n      properties:\n        handle:\n          type: string\n`,
+      }),
+    ),
   },
   {
     name: 'optional-request-property-added',
     note: 'optional request property added; expect: no breaking (property-added info)',
-    baseline: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      properties:\n        handle:\n          type: string\n`,
-    })),
-    current: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      properties:\n        handle:\n          type: string\n        nickname:\n          type: string\n`,
-    })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      properties:\n        handle:\n          type: string\n`,
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      properties:\n        handle:\n          type: string\n        nickname:\n          type: string\n`,
+      }),
+    ),
   },
   {
     name: 'optional-to-required-request-property',
     note: 'optional→required property on request body; expect: BREAKING (required-property-added error)',
-    baseline: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      properties:\n        bio:\n          type: string\n`,
-    })),
-    current: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      required:\n        - bio\n      properties:\n        bio:\n          type: string\n`,
-    })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      properties:\n        bio:\n          type: string\n`,
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      required:\n        - bio\n      properties:\n        bio:\n          type: string\n`,
+      }),
+    ),
   },
   {
     name: 'request-property-removed-warning',
     note: 'optional request property removed; expect: no breaking (property-removed warning, send side)',
-    baseline: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      properties:\n        nickname:\n          type: string\n`,
-    })),
-    current: doc('3.0.3', USERS_PATH(true), stdSchemas({
-      userInput: `      properties: {}\n`,
-    })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      properties:\n        nickname:\n          type: string\n`,
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userInput: `      properties: {}\n`,
+      }),
+    ),
   },
   {
     name: 'response-property-removed',
     note: 'response property removed; expect: BREAKING (property-removed error, parse side)',
-    baseline: doc('3.0.3', USERS_PATH(), stdSchemas({
-      userList: `      properties:\n        items:\n          type: array\n          items:\n            $ref: '#/components/schemas/User'\n        totalCount:\n          type: integer\n`,
-    })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userList: `      properties:\n        items:\n          type: array\n          items:\n            $ref: '#/components/schemas/User'\n        totalCount:\n          type: integer\n`,
+      }),
+    ),
     current: BASE('3.0.3'),
   },
   {
     name: 'property-type-changed',
     note: 'property type changed; expect: BREAKING (property-type-changed error)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        id:\n          type: string', '        id:\n          type: integer') })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        id:\n          type: string',
+          '        id:\n          type: integer',
+        ),
+      }),
+    ),
   },
   {
     name: 'format-changed',
     note: 'format changed; expect: no breaking (property-format-changed warning)',
-    baseline: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        email:\n          type: string', '        email:\n          type: string\n          format: email') })),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        email:\n          type: string', '        email:\n          type: string\n          format: uri') })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        email:\n          type: string',
+          '        email:\n          type: string\n          format: email',
+        ),
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        email:\n          type: string',
+          '        email:\n          type: string\n          format: uri',
+        ),
+      }),
+    ),
   },
   {
     name: 'enum-value-removed',
     note: 'enum value removed; expect: BREAKING (enum-value-removed error)',
-    baseline: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        name:\n          type: string', '        name:\n          type: string\n          enum: [alice, bob]') })),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        name:\n          type: string', '        name:\n          type: string\n          enum: [alice]') })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        name:\n          type: string',
+          '        name:\n          type: string\n          enum: [alice, bob]',
+        ),
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        name:\n          type: string',
+          '        name:\n          type: string\n          enum: [alice]',
+        ),
+      }),
+    ),
   },
   {
     name: 'enum-value-added',
     note: 'enum value added; expect: no breaking (enum-value-added info)',
-    baseline: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        name:\n          type: string', '        name:\n          type: string\n          enum: [alice]') })),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD.replace('        name:\n          type: string', '        name:\n          type: string\n          enum: [alice, bob]') })),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        name:\n          type: string',
+          '        name:\n          type: string\n          enum: [alice]',
+        ),
+      }),
+    ),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        name:\n          type: string',
+          '        name:\n          type: string\n          enum: [alice, bob]',
+        ),
+      }),
+    ),
   },
   {
     name: 'response-status-removed',
-    note: "default response removed; expect: BREAKING (default-response-removed error)",
+    note: 'default response removed; expect: BREAKING (default-response-removed error)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace(/ {8}default:\n {10}description: Error\n {10}content:\n {12}application\/json:\n {14}schema:\n {16}\$ref: '#\/components\/schemas\/Error'/, ''), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace(
+        / {8}default:\n {10}description: Error\n {10}content:\n {12}application\/json:\n {14}schema:\n {16}\$ref: '#\/components\/schemas\/Error'/,
+        '',
+      ),
+      stdSchemas(),
+    ),
   },
   {
     name: 'constraint-tightened',
     note: 'constraint tightened (minimum 1→10); expect: BREAKING (constraint-tightened error)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace('            minimum: 1', '            minimum: 10'), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace('            minimum: 1', '            minimum: 10'),
+      stdSchemas(),
+    ),
   },
   {
     name: 'constraint-relaxed',
     note: 'constraint relaxed (maximum 100→1000); expect: no breaking (constraint-relaxed info)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace('            maximum: 100', '            maximum: 1000'), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace('            maximum: 100', '            maximum: 1000'),
+      stdSchemas(),
+    ),
   },
   {
     name: 'required-array-shrunk',
@@ -326,13 +445,25 @@ const CASES: Pair[] = [
     name: 'additionalproperties-closed',
     note: 'additionalProperties closed; expect: BREAKING (map-closed error)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD + '      additionalProperties: false\n' })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({ userProps: USER_PROPS_STD + '      additionalProperties: false\n' }),
+    ),
   },
   {
     name: 'allof-member-added',
     note: 'allOf member added; expect: no breaking (allOf-member-added warning)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD + '      allOf:\n        - type: object\n          properties:\n            extra:\n              type: string\n' })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps:
+          USER_PROPS_STD +
+          '      allOf:\n        - type: object\n          properties:\n            extra:\n              type: string\n',
+      }),
+    ),
   },
   {
     name: 'oneof-member-removed',
@@ -344,37 +475,76 @@ const CASES: Pair[] = [
     name: 'discriminator-added',
     note: 'discriminator added; expect: no breaking (discriminator-added warning)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas({ userProps: USER_PROPS_STD + '      discriminator:\n        propertyName: kind\n' })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas({
+        userProps: USER_PROPS_STD + '      discriminator:\n        propertyName: kind\n',
+      }),
+    ),
   },
   {
     name: 'readonly-flip',
     note: 'readOnly flip; expect: request-view treats id as server-generated (property-removed warning on request side per §11.5)',
     baseline: doc('3.0.3', USERS_PATH(true), stdSchemas()),
-    current: doc('3.0.3', USERS_PATH(true), stdSchemas({ userProps: USER_PROPS_STD.replace('        id:\n          type: string', '        id:\n          type: string\n          readOnly: true') })),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(true),
+      stdSchemas({
+        userProps: USER_PROPS_STD.replace(
+          '        id:\n          type: string',
+          '        id:\n          type: string\n          readOnly: true',
+        ),
+      }),
+    ),
   },
   {
     name: 'server-url-removed',
     note: 'server URL removed; expect: BREAKING (server-url-removed error)',
-    baseline: doc('3.0.3', USERS_PATH(), stdSchemas(), '  - url: https://api.example.com/v1\n  - url: https://api.example.com/v2'),
+    baseline: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas(),
+      '  - url: https://api.example.com/v1\n  - url: https://api.example.com/v2',
+    ),
     current: doc('3.0.3', USERS_PATH(), stdSchemas(), '  - url: https://api.example.com/v1'),
   },
   {
     name: 'server-url-added',
     note: 'server URL added; expect: no breaking (server-url-added info)',
     baseline: doc('3.0.3', USERS_PATH(), stdSchemas(), '  - url: https://api.example.com/v1'),
-    current: doc('3.0.3', USERS_PATH(), stdSchemas(), '  - url: https://api.example.com/v1\n  - url: https://api.example.com/v2'),
+    current: doc(
+      '3.0.3',
+      USERS_PATH(),
+      stdSchemas(),
+      '  - url: https://api.example.com/v1\n  - url: https://api.example.com/v2',
+    ),
   },
   {
     name: 'description-only-change',
     note: 'description-only change; expect: no breaking, patch (operation-description-changed info)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace('      summary: List users', '      summary: List users\n      description: Returns a paginated list'), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace(
+        '      summary: List users',
+        '      summary: List users\n      description: Returns a paginated list',
+      ),
+      stdSchemas(),
+    ),
   },
   {
     name: 'parameter-made-required',
     note: 'parameter made required; expect: BREAKING (parameter-made-required error)',
     baseline: BASE('3.0.3'),
-    current: doc('3.0.3', USERS_PATH().replace('        - name: limit\n          in: query\n          required: false', '        - name: limit\n          in: query\n          required: true'), stdSchemas()),
+    current: doc(
+      '3.0.3',
+      USERS_PATH().replace(
+        '        - name: limit\n          in: query\n          required: false',
+        '        - name: limit\n          in: query\n          required: true',
+      ),
+      stdSchemas(),
+    ),
   },
   {
     name: 'request-body-removed',
@@ -547,8 +717,14 @@ paths:
               schema:
                 $ref: 'common.yaml#/components/schemas/Shared'
 `;
-  fs.writeFileSync(path.join(extDir, 'baseline.yaml'), `# Fixture: external-file $ref (denied in v1 — expect exit 3)\n` + spec);
-  fs.writeFileSync(path.join(extDir, 'current.yaml'), `# Fixture: external-file $ref (denied in v1 — expect exit 3)\n` + spec);
+  fs.writeFileSync(
+    path.join(extDir, 'baseline.yaml'),
+    `# Fixture: external-file $ref (denied in v1 — expect exit 3)\n` + spec,
+  );
+  fs.writeFileSync(
+    path.join(extDir, 'current.yaml'),
+    `# Fixture: external-file $ref (denied in v1 — expect exit 3)\n` + spec,
+  );
 }
 
 // ---------- run ----------

@@ -7,7 +7,10 @@ const CLI = path.resolve(import.meta.dirname, '../../src/cli/main.ts');
 const FIX = (v: string, name: string) =>
   path.resolve(import.meta.dirname, `../../tests/fixtures/${v}/${name}`);
 
-function runCli(args: string[], env: Record<string, string> = {}): {
+function runCli(
+  args: string[],
+  env: Record<string, string> = {},
+): {
   status: number;
   stdout: string;
   stderr: string;
@@ -79,7 +82,9 @@ describe('apiguard diff CLI (integration)', () => {
       'json',
     ]);
     const report = JSON.parse(r.stdout);
-    const removedPaths = report.changes.filter((c: { ruleId: string }) => c.ruleId === 'removed-path');
+    const removedPaths = report.changes.filter(
+      (c: { ruleId: string }) => c.ruleId === 'removed-path',
+    );
     expect(removedPaths).toHaveLength(1);
     expect(removedPaths[0].breaking).toBe(true);
   });
@@ -357,7 +362,13 @@ describe('apiguard init CLI (integration)', () => {
     try {
       runCli(['init', tmp]);
       const cfg = path.join(tmp, 'apiguard.yaml');
-      const r = runCli(['diff', FIX('3.0', 'no-changes/baseline.yaml'), FIX('3.0', 'no-changes/current.yaml'), '--config', cfg]);
+      const r = runCli([
+        'diff',
+        FIX('3.0', 'no-changes/baseline.yaml'),
+        FIX('3.0', 'no-changes/current.yaml'),
+        '--config',
+        cfg,
+      ]);
       expect(r.status).toBe(0);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

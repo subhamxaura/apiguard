@@ -33,7 +33,8 @@ function resolveFormat(opts: DiffOptions): 'terminal' | 'json' | 'markdown' {
     throw new CliUsageError(`invalid --format "${opts.format}" (expected terminal|json|markdown)`);
   }
   const envFormat = process.env.APIGUARD_FORMAT;
-  if (envFormat === 'json' || envFormat === 'markdown' || envFormat === 'terminal') return envFormat;
+  if (envFormat === 'json' || envFormat === 'markdown' || envFormat === 'terminal')
+    return envFormat;
   return 'terminal';
 }
 
@@ -45,7 +46,8 @@ function resolveFailOn(opts: DiffOptions): 'error' | 'warning' | 'never' {
 
 function colorEnabled(opts: DiffOptions, configColor: 'auto' | 'always' | 'never'): boolean {
   if (opts.color === false) return false; // --no-color
-  if (process.env.APIGUARD_NO_COLOR !== undefined || process.env.NO_COLOR !== undefined) return false;
+  if (process.env.APIGUARD_NO_COLOR !== undefined || process.env.NO_COLOR !== undefined)
+    return false;
   if (configColor === 'always') return true;
   if (configColor === 'never') return false;
   return process.stdout.isTTY === true;
@@ -79,7 +81,10 @@ export async function runDiff(
   const wantBump = !opts.quiet && (config.versioning.suggest || opts.suggestVersion === true);
   if (opts.quiet) {
     // §13: --quiet prints only the one-line verdict, regardless of format
-    body = report.summary.bySeverity.error > 0 ? '❌ Breaking API changes found' : '✓ No breaking API changes found';
+    body =
+      report.summary.bySeverity.error > 0
+        ? '❌ Breaking API changes found'
+        : '✓ No breaking API changes found';
   } else if (config.output.format === 'json') {
     body = renderJson(report);
   } else if (config.output.format === 'markdown') {
@@ -89,7 +94,9 @@ export async function runDiff(
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,
       showIgnored: Boolean(opts.showIgnored) || loaded.config.ignore.showIgnored === true,
-      color: config.output.color === 'always' || (config.output.color === 'auto' && process.stdout.isTTY === true),
+      color:
+        config.output.color === 'always' ||
+        (config.output.color === 'auto' && process.stdout.isTTY === true),
       quiet: Boolean(opts.quiet),
     });
     body = lines.join('\n');

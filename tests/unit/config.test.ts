@@ -46,7 +46,9 @@ describe('config discovery (§14.1)', () => {
 
   it('explicit --config missing file is a ConfigError (exit 2)', () => {
     const d = tmp();
-    expect(() => discoverAndLoadConfig({ explicit: path.join(d, 'nope.yaml') })).toThrow(ConfigError);
+    expect(() => discoverAndLoadConfig({ explicit: path.join(d, 'nope.yaml') })).toThrow(
+      ConfigError,
+    );
   });
 
   it('APIGUARD_CONFIG env is honored', () => {
@@ -66,7 +68,10 @@ describe('config discovery (§14.1)', () => {
 
   it('rejects invalid severity values and unknown keys naming the key', () => {
     const d = tmp();
-    fs.writeFileSync(path.join(d, 'apiguard.yaml'), 'schemaVersion: 1\nrules:\n  removed-path: fatal\n');
+    fs.writeFileSync(
+      path.join(d, 'apiguard.yaml'),
+      'schemaVersion: 1\nrules:\n  removed-path: fatal\n',
+    );
     expect(() => discoverAndLoadConfig({ cwd: d })).toThrow(ConfigError);
     fs.writeFileSync(path.join(d, 'apiguard.yaml'), 'schemaVersion: 1\nunknownKey: 1\n');
     expect(() => discoverAndLoadConfig({ cwd: d })).toThrow(ConfigError);
@@ -96,10 +101,7 @@ describe('legacy aliases (§14.3)', () => {
 
 describe('CLI > env > file precedence (§14.2)', () => {
   it('flags override file config', () => {
-    const merged = mergeWithFlags(
-      { ...DEFAULT_CONFIG, failOn: 'warning' },
-      { failOn: 'never' },
-    );
+    const merged = mergeWithFlags({ ...DEFAULT_CONFIG, failOn: 'warning' }, { failOn: 'never' });
     expect(merged.failOn).toBe('never');
   });
 

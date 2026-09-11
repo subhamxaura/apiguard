@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { sortChanges, dedupeChanges, compareChanges, idFor, pointerJoin, METHOD_RANK } from '../../src/utils/sort.js';
+import {
+  sortChanges,
+  dedupeChanges,
+  compareChanges,
+  idFor,
+  pointerJoin,
+  METHOD_RANK,
+} from '../../src/utils/sort.js';
 import type { ApiChange } from '../../src/core/models/change.js';
 
 function change(partial: {

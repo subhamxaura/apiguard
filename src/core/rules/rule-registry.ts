@@ -200,8 +200,7 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['operation'],
     trigger: 'operationId changed (SDK/client code impact).',
-    message: (c) =>
-      `operationId changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) => `operationId changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'regenerate SDKs; code referencing the old method name must be updated',
   },
   {
@@ -293,8 +292,7 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'addition',
     contexts: ['parameter'],
     trigger: 'A new required header/query/cookie/path parameter was added.',
-    message: (c) =>
-      `Required parameter \`${nameOf(c)}\` added`,
+    message: (c) => `Required parameter \`${nameOf(c)}\` added`,
     suggestion: (c) => `clients must now send \`${nameOf(c)}\` on every request`,
   },
   {
@@ -314,8 +312,7 @@ export const RULES: RuleDefinition[] = [
     trigger:
       'A parameter was removed; error when it was required, a header, or a path param — else warning (§10.5).',
     message: (c) => `Parameter \`${nameOf(c)}\` removed`,
-    suggestion: (c) =>
-      `stop sending \`${nameOf(c)}\`; servers will ignore unknown parameters`,
+    suggestion: (c) => `stop sending \`${nameOf(c)}\`; servers will ignore unknown parameters`,
   },
   {
     id: 'parameter-made-required',
@@ -437,7 +434,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'addition',
     contexts: ['request-body', 'response-body'],
     trigger: 'A media type was added.',
-    message: (c) => `Media type ${fmt(c.newValue)} added to ${c.location.context === 'request-body' ? 'request' : 'response'}`,
+    message: (c) =>
+      `Media type ${fmt(c.newValue)} added to ${c.location.context === 'request-body' ? 'request' : 'response'}`,
     suggestion: () => 'additive; adopt when ready',
   },
   {
@@ -465,7 +463,8 @@ export const RULES: RuleDefinition[] = [
     contexts: ['response-body'],
     trigger: 'A declared status code was removed.',
     message: (c) => `Response ${fmt(c.oldValue)} removed`,
-    suggestion: () => 'clients expecting this status will treat it as unexpected; update error handling',
+    suggestion: () =>
+      'clients expecting this status will treat it as unexpected; update error handling',
   },
   {
     id: 'default-response-removed',
@@ -509,7 +508,16 @@ export const RULES: RuleDefinition[] = [
     id: 'property-added',
     defaultSeverity: 'info',
     defaultKind: 'addition',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'A new property that is NOT required was added.',
     message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` added${whereLabel(c.location)}`,
     suggestion: () => 'additive; clients can consume the new field when ready',
@@ -518,8 +526,18 @@ export const RULES: RuleDefinition[] = [
     id: 'required-property-added',
     defaultSeverity: 'error',
     defaultKind: 'modification',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
-    trigger: 'A property is newly present and required, or an optional property became required (§10.5).',
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
+    trigger:
+      'A property is newly present and required, or an optional property became required (§10.5).',
     message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` changed from optional to required`,
     suggestion: (c) => `clients must now provide \`${nameOf(c)}\``,
   },
@@ -527,27 +545,58 @@ export const RULES: RuleDefinition[] = [
     id: 'property-removed',
     defaultSeverity: 'warning',
     defaultKind: 'removal',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'A property was removed; severity resolves per the §10.5 context table.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` was removed${whereLabel(c.location)}`,
-    suggestion: (c) => `stop relying on \`${nameOf(c)}\`${c.location.context === 'response-body' ? '; it will no longer be returned' : ''}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` was removed${whereLabel(c.location)}`,
+    suggestion: (c) =>
+      `stop relying on \`${nameOf(c)}\`${c.location.context === 'response-body' ? '; it will no longer be returned' : ''}`,
   },
   {
     id: 'property-type-changed',
     defaultSeverity: 'error',
     defaultKind: 'modification',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'A schema type changed (including array item type via pointer to items).',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'update serializers/deserializers for the new type',
   },
   {
     id: 'property-format-changed',
     defaultSeverity: 'warning',
     defaultKind: 'modification',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'A schema format changed (advisory; pair with type change for error).',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` format changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` format changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'verify validation libraries that enforce the format',
   },
   {
@@ -556,23 +605,43 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: 'A schema default changed.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` default changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` default changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'verify clients that relied on the previous default',
   },
   {
     id: 'enum-value-removed',
     defaultSeverity: 'error',
     defaultKind: 'removal',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'An enum member was removed (anywhere).',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` enum value ${fmt(c.oldValue)} removed`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` enum value ${fmt(c.oldValue)} removed`,
     suggestion: () => 'stop sending/expecting the removed enum value; update switch statements',
   },
   {
     id: 'enum-value-added',
     defaultSeverity: 'info',
     defaultKind: 'addition',
-    contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook', 'request-header', 'response-header'],
+    contexts: [
+      'request-body',
+      'response-body',
+      'parameter',
+      'component',
+      'callback',
+      'webhook',
+      'request-header',
+      'response-header',
+    ],
     trigger: 'An enum member was added.',
     message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` enum value ${fmt(c.newValue)} added`,
     suggestion: () => 'handle the new enum value in client logic',
@@ -583,7 +652,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: '`const` was introduced where none existed.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` must now be exactly ${fmt(c.newValue)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` must now be exactly ${fmt(c.newValue)}`,
     suggestion: () => 'clients sending other values will be rejected',
   },
   {
@@ -592,7 +662,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: 'A `const` value changed.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` const changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` const changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'update clients to the new constant value',
   },
   {
@@ -609,7 +680,8 @@ export const RULES: RuleDefinition[] = [
     defaultSeverity: 'error',
     defaultKind: 'modification',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
-    trigger: 'A restrictive constraint was introduced where none existed (pattern, minLength, minItems, min/max, exclusive*, multipleOf).',
+    trigger:
+      'A restrictive constraint was introduced where none existed (pattern, minLength, minItems, min/max, exclusive*, multipleOf).',
     message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` now requires ${constraintText(c)}`,
     suggestion: () => 'update clients to satisfy the new constraint',
   },
@@ -619,7 +691,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: 'An existing constraint was made stricter (numeric compare after normalization).',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint tightened: ${constraintText(c)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` constraint tightened: ${constraintText(c)}`,
     suggestion: () => 'previously-valid payloads may now be rejected; update clients',
   },
   {
@@ -628,7 +701,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'relaxation',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: 'A constraint was loosened.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint relaxed: ${constraintText(c)}`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` constraint relaxed: ${constraintText(c)}`,
     suggestion: () => 'relaxation; no client action required',
   },
   {
@@ -637,7 +711,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'relaxation',
     contexts: ['request-body', 'response-body', 'parameter', 'component', 'callback', 'webhook'],
     trigger: 'A constraint was deleted.',
-    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint ${constraintText(c)} removed`,
+    message: (c) =>
+      `${sideLabel(c.location)} \`${nameOf(c)}\` constraint ${constraintText(c)} removed`,
     suggestion: () => 'relaxation; no client action required',
   },
   {
@@ -756,7 +831,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['security'],
     trigger: 'A scheme type changed (http/apiKey/oauth2/openIdConnect/mutualTLS).',
-    message: (c) => `Security scheme \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    message: (c) =>
+      `Security scheme \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
     suggestion: () => 'client credentials/flows for the old type will fail',
   },
   {
@@ -773,7 +849,8 @@ export const RULES: RuleDefinition[] = [
     defaultSeverity: 'error',
     defaultKind: 'removal',
     contexts: ['security'],
-    trigger: 'A scope was removed from a scheme that ≥1 operation requirement references; else info.',
+    trigger:
+      'A scope was removed from a scheme that ≥1 operation requirement references; else info.',
     message: (c) => `OAuth scope \`${nameOf(c)}\` removed`,
     suggestion: () => 'tokens granted only the removed scope will fail authorization',
   },
@@ -810,7 +887,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'modification',
     contexts: ['security'],
     trigger: 'An operation requirement now demands a scope not previously required.',
-    message: (c) => `Operation ${c.location.path} now requires scope \`${String(c.newValue ?? '')}\``,
+    message: (c) =>
+      `Operation ${c.location.path} now requires scope \`${String(c.newValue ?? '')}\``,
     suggestion: () => 'clients must request the additional scope from the authorization server',
   },
   {
@@ -828,7 +906,8 @@ export const RULES: RuleDefinition[] = [
     defaultKind: 'relaxation',
     contexts: ['security'],
     trigger: 'A narrower scope set is now accepted.',
-    message: (c) => `Operation ${c.location.path} no longer requires scope \`${String(c.oldValue ?? '')}\``,
+    message: (c) =>
+      `Operation ${c.location.path} no longer requires scope \`${String(c.oldValue ?? '')}\``,
     suggestion: () => 'relaxation; existing tokens keep working',
   },
 ];

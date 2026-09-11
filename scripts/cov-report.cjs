@@ -1,7 +1,8 @@
 // Dev utility: list uncovered lines/branches from coverage/coverage-final.json
 const fs = require('fs');
 const det = JSON.parse(fs.readFileSync('coverage/coverage-final.json', 'utf8'));
-const FILTER = /differ|index-build|spec-loader|schema-differ|ignore|comparator|run\.ts|diff-command|validate-command|analyze|sort|hash|errors|loader\.ts|validate\.ts/;
+const FILTER =
+  /differ|index-build|spec-loader|schema-differ|ignore|comparator|run\.ts|diff-command|validate-command|analyze|sort|hash|errors|loader\.ts|validate\.ts/;
 for (const [file, cov] of Object.entries(det)) {
   const norm = file.split(/[\\/]/).join('/');
   const m = norm.match(/src\/(.*)$/);

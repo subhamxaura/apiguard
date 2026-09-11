@@ -34,8 +34,6 @@ export async function runValidate(
     io.stdout(`✗ ${warnings.length} semantic warning(s)`);
     return { exitCode: 1 };
   }
-  io.stdout(
-    `✓ ${spec} is valid${warnings.length > 0 ? ` (${warnings.length} warning(s))` : ''}`,
-  );
+  io.stdout(`✓ ${spec} is valid${warnings.length > 0 ? ` (${warnings.length} warning(s))` : ''}`);
   return { exitCode: 0 };
 }

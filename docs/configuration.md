@@ -10,37 +10,37 @@ config files are a usage error (exit 2); discovery that finds nothing silently u
 schemaVersion: 1
 
 rules:
-  property-removed: warning          # error | warning | info | off
+  property-removed: warning # error | warning | info | off
   description-changed@operation: off # per-context override (ruleId@context)
-  removed-parameter@media-type: off  # context names come from the rule reference
+  removed-parameter@media-type: off # context names come from the rule reference
 
 ignore:
-  paths:                             # globs against the spec path (micromatch)
-    - "/internal/**"
-    - "/legacy/*"
-  operations:                        # "METHOD /path" entries
-    - "GET /users/search"
-  schemas:                           # component schema names
-    - "LegacyUser"
-  changes:                           # rule ids, everywhere
-    - "description-changed"
-  showIgnored: false                 # implies --show-ignored when true
+  paths: # globs against the spec path (micromatch)
+    - '/internal/**'
+    - '/legacy/*'
+  operations: # "METHOD /path" entries
+    - 'GET /users/search'
+  schemas: # component schema names
+    - 'LegacyUser'
+  changes: # rule ids, everywhere
+    - 'description-changed'
+  showIgnored: false # implies --show-ignored when true
 
 output:
-  format: terminal                   # terminal | json | markdown
+  format: terminal # terminal | json | markdown
   includeNonBreaking: false
-  color: auto                        # auto | always | never
+  color: auto # auto | always | never
 
-failOn: error                        # error | warning | never
+failOn: error # error | warning | never
 
 versioning:
-  suggest: true                      # compute report.semver
+  suggest: true # compute report.semver
 
 loader:
-  allowRemoteRefs: false             # deny http(s) $ref fetching (default)
+  allowRemoteRefs: false # deny http(s) $ref fetching (default)
 
 github:
-  comment: false                     # reserved for Action-side comment config
+  comment: false # reserved for Action-side comment config
   checkRun: false
   updateExistingComment: false
 ```
@@ -52,7 +52,7 @@ severity everywhere the rule can fire; `ruleId@context` narrows it to one contex
 
 ```yaml
 rules:
-  enum-value-removed: error              # default
+  enum-value-removed: error # default
   enum-value-removed@response-body: info # lenient where clients just display values
 ```
 

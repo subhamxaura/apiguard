@@ -91,7 +91,7 @@ describe('action bundle e2e', () => {
   });
 
   it('fails on breaking changes and emits outputs (merge-base baseline)', () => {
-    const r = runAction({ 'INPUT_CURRENT': 'openapi.yaml', 'INPUT_BASE': 'main' });
+    const r = runAction({ INPUT_CURRENT: 'openapi.yaml', INPUT_BASE: 'main' });
     expect(r.status).not.toBe(0);
     const out = r.stdout + r.stderr;
     expect(out).toContain('::set-output name=breaking::1');
@@ -105,8 +105,8 @@ describe('action bundle e2e', () => {
 
   it('passes with fail-on=never despite breaking changes', () => {
     const r = runAction({
-      'INPUT_CURRENT': 'openapi.yaml',
-      'INPUT_BASE': 'main',
+      INPUT_CURRENT: 'openapi.yaml',
+      INPUT_BASE: 'main',
       'INPUT_FAIL-ON': 'never',
     });
     expect(r.status).toBe(0);
@@ -116,8 +116,8 @@ describe('action bundle e2e', () => {
   it('writes the markdown report when markdown-file is set', () => {
     const md = path.join(workspace, 'report.md');
     const r = runAction({
-      'INPUT_CURRENT': 'openapi.yaml',
-      'INPUT_BASE': 'main',
+      INPUT_CURRENT: 'openapi.yaml',
+      INPUT_BASE: 'main',
       'INPUT_FAIL-ON': 'never',
       'INPUT_MARKDOWN-FILE': md,
     });
@@ -126,7 +126,7 @@ describe('action bundle e2e', () => {
   });
 
   it('fails with a readable message for a missing spec', () => {
-    const r = runAction({ 'INPUT_CURRENT': 'nope.yaml', 'INPUT_BASE': 'main' });
+    const r = runAction({ INPUT_CURRENT: 'nope.yaml', INPUT_BASE: 'main' });
     expect(r.status).not.toBe(0);
     expect(r.stdout + r.stderr).toMatch(/nope\.yaml/);
   });

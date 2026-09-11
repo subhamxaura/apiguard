@@ -33,9 +33,10 @@ export function buildProgram(io: CliIo): Command {
     writeOut: (s) => io.stdout(s.trimEnd()),
     writeErr: (s) => io.stderr(s.trimEnd()),
   });
-  program.name('apiguard').version(TOOL_VERSION).description(
-    'Detect breaking changes between OpenAPI specifications',
-  );
+  program
+    .name('apiguard')
+    .version(TOOL_VERSION)
+    .description('Detect breaking changes between OpenAPI specifications');
 
   const diff = program
     .command('diff')
@@ -76,7 +77,8 @@ export function buildProgram(io: CliIo): Command {
     .action(async (spec, opts) => {
       const outcome = await runValidate(spec, opts, io);
       if (outcome.exitCode !== ExitCode.Ok) {
-        (program as unknown as { __apiguardExitCode?: number }).__apiguardExitCode = outcome.exitCode;
+        (program as unknown as { __apiguardExitCode?: number }).__apiguardExitCode =
+          outcome.exitCode;
       }
     });
 

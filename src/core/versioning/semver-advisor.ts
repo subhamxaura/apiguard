@@ -40,9 +40,7 @@ export function suggestVersion(changes: ApiChange[]): SemverAdvice {
     };
   }
 
-  const patchish = changes.filter(
-    (c) => c.kind === 'relaxation' || c.kind === 'documentation',
-  );
+  const patchish = changes.filter((c) => c.kind === 'relaxation' || c.kind === 'documentation');
   if (patchish.length > 0) {
     const triggers = [...new Set(patchish.map((c) => c.ruleId))].sort();
     return {

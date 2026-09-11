@@ -33,7 +33,10 @@ afterEach(() => {
   delete process.env.NO_COLOR;
 });
 
-function ioFor(argv: string[], env: Record<string, string> = {}): CliIo & { out: string[]; err: string[] } {
+function ioFor(
+  argv: string[],
+  env: Record<string, string> = {},
+): CliIo & { out: string[]; err: string[] } {
   const out: string[] = [];
   const err: string[] = [];
   return {

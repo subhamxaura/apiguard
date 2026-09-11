@@ -18,18 +18,13 @@
     "url": "https://github.com/apiguard/apiguard.git"
   },
   "bin": {
-    "apiguard": "./dist/cli.js"
+    "apiguard": "./dist/cli/main.js"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js",
-      "require": "./dist/cli.cjs"
     }
   },
   "files": [

@@ -38,6 +38,12 @@ export function exitCodeFor(err: unknown): number {
 
 /** Render an error for stderr per §24 message shape. */
 export function renderError(err: unknown, verbose = false): string {
+  if (isCommanderError(err)) {
+    // --help/--version and usage errors are informational/usage output, not internal faults;
+    // commander already wrote the help/usage text via configureOutput.
+    if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') return '';
+    return `error: ${err.message}`;
+  }
   if (err instanceof ApiguardError) {
     const hint = err.exitCode === ExitCode.Internal ? ' (please report this bug)' : '';
     return `error: ${err.message}${hint}${verbose && err.stack ? '\n' + err.stack : ''}`;

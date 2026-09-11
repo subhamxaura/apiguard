@@ -7,10 +7,7 @@ export default {
   plugins: [
     '@semantic-release/commit-analyzer',
     '@semantic-release/release-notes-generator',
-    [
-      '@semantic-release/changelog',
-      { changelogFile: 'CHANGELOG.md' },
-    ],
+    ['@semantic-release/changelog', { changelogFile: 'CHANGELOG.md' }],
     [
       '@semantic-release/exec',
       { prepareCmd: 'pnpm build && pnpm build:action && pnpm docs:rules' },
@@ -23,9 +20,6 @@ export default {
       },
     ],
     ['@semantic-release/github', {}],
-    [
-      '@semantic-release/npm',
-      { npmPublish: true },
-    ],
+    ['@semantic-release/npm', { npmPublish: true }],
   ],
 };

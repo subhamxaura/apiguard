@@ -81,4 +81,3 @@ components:
           properties:
             cash:
               type: string
-

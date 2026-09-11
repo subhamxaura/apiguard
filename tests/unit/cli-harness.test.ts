@@ -50,13 +50,16 @@ describe('CLI run() harness (§13)', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'a.yaml'), SPEC_OK);
     // response-removed → error → exit 1 (§17 fail-on error)
-    fs.writeFileSync(path.join(d, 'b.yaml'), `openapi: 3.0.3
+    fs.writeFileSync(
+      path.join(d, 'b.yaml'),
+      `openapi: 3.0.3
 info: {title: T, version: '1.0'}
 paths:
   /a:
     get:
       responses: {}
-`);
+`,
+    );
     const io = ioFor(['diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'), '--no-color']);
     const code = await run(io);
     expect(code).toBe(1);
@@ -86,8 +89,12 @@ paths:
     fs.writeFileSync(path.join(d, 'a.yaml'), SPEC_OK);
     fs.writeFileSync(path.join(d, 'b.yaml'), SPEC_OK);
     const io = ioFor([
-      'diff', path.join(d, 'a.yaml'), path.join(d, 'b.yaml'),
-      '--config', path.join(d, 'nope.yaml'), '--no-color',
+      'diff',
+      path.join(d, 'a.yaml'),
+      path.join(d, 'b.yaml'),
+      '--config',
+      path.join(d, 'nope.yaml'),
+      '--no-color',
     ]);
     const code = await run(io);
     expect(code).toBe(2);

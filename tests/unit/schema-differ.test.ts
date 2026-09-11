@@ -168,8 +168,14 @@ describe('recursive schema differ (§10.4)', () => {
       ),
     );
     const { report } = await analyze(p.old, p.cur, {});
-    expect(report.changes.some((c) => c.ruleId === 'enum-value-removed' && String(c.oldValue) === 'banned')).toBe(true);
-    expect(report.changes.some((c) => c.ruleId === 'enum-value-added' && c.newValue === 'pending')).toBe(true);
+    expect(
+      report.changes.some(
+        (c) => c.ruleId === 'enum-value-removed' && String(c.oldValue) === 'banned',
+      ),
+    ).toBe(true);
+    expect(
+      report.changes.some((c) => c.ruleId === 'enum-value-added' && c.newValue === 'pending'),
+    ).toBe(true);
   });
 
   it('pattern change counts as tightened even when loosened (§11.3 bluntness)', async () => {
@@ -225,8 +231,17 @@ describe('recursive schema differ (§10.4)', () => {
           type: string
 `;
     const p = specPair(
-      DOC(schema, `  /a:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Node'`),
-      DOC(schema.replace('        name:\n          type: string\n', '        name:\n          type: number\n'), `  /a:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Node'`),
+      DOC(
+        schema,
+        `  /a:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Node'`,
+      ),
+      DOC(
+        schema.replace(
+          '        name:\n          type: string\n',
+          '        name:\n          type: number\n',
+        ),
+        `  /a:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Node'`,
+      ),
     );
     const { report } = await analyze(p.old, p.cur, {});
     expect(report.changes.some((c) => c.ruleId === 'property-type-changed')).toBe(true);
@@ -290,7 +305,9 @@ ${schemes}`;
     );
     const { report } = await analyze(p.old, p.cur, {});
     // scheme still referenced in the old doc → error (§10.6)
-    expect(report.changes.some((c) => c.ruleId === 'security-scheme-removed' && c.severity === 'error')).toBe(true);
+    expect(
+      report.changes.some((c) => c.ruleId === 'security-scheme-removed' && c.severity === 'error'),
+    ).toBe(true);
     // the operation's scheme SET is unchanged (same key), so requirement-changed does not fire;
     // the scheme's disappearance is reported once at the component level.
     expect(report.changes.some((c) => c.ruleId === 'security-requirement-changed')).toBe(false);
@@ -316,9 +333,16 @@ components:
       in: header
       name: X-Api
 `;
-    const p = specPair(base.replace('SEC\n', ''), base.replace('SEC\n', '      security:\n        - apiKeyAuth: []\n'));
+    const p = specPair(
+      base.replace('SEC\n', ''),
+      base.replace('SEC\n', '      security:\n        - apiKeyAuth: []\n'),
+    );
     const { report } = await analyze(p.old, p.cur, {});
-    expect(report.changes.some((c) => c.ruleId === 'security-requirement-added' && c.severity === 'error')).toBe(true);
+    expect(
+      report.changes.some(
+        (c) => c.ruleId === 'security-requirement-added' && c.severity === 'error',
+      ),
+    ).toBe(true);
   });
 
   it('security removed entirely is warning relaxation (§10.6)', async () => {
@@ -340,7 +364,10 @@ components:
       in: header
       name: X-Api
 `;
-    const p = specPair(base.replace('SEC\n', '      security:\n        - apiKeyAuth: []\n'), base.replace('SEC\n', ''));
+    const p = specPair(
+      base.replace('SEC\n', '      security:\n        - apiKeyAuth: []\n'),
+      base.replace('SEC\n', ''),
+    );
     const { report } = await analyze(p.old, p.cur, {});
     const removed = report.changes.find((c) => c.ruleId === 'security-requirement-removed');
     expect(removed?.severity).toBe('warning');
@@ -374,25 +401,34 @@ components:
     const p = specPair(doc('- read'), doc('- read\n            - write'));
     const { report } = await analyze(p.old, p.cur, {});
     // old [read] is no longer satisfied by new [read, write] → requirement-changed (error, §10.6)
-    expect(report.changes.some((c) => c.ruleId === 'security-requirement-changed' && c.severity === 'error')).toBe(true);
+    expect(
+      report.changes.some(
+        (c) => c.ruleId === 'security-requirement-changed' && c.severity === 'error',
+      ),
+    ).toBe(true);
 
     const rev = specPair(fs.readFileSync(p.cur, 'utf8'), fs.readFileSync(p.old, 'utf8'));
     const { report: r2 } = await analyze(rev.old, rev.cur, {});
     // reverse: new accepts just [read] → narrower scope set, relaxation (info)
-    expect(r2.changes.some((c) => c.ruleId === 'security-scope-required-removed' && c.severity === 'info')).toBe(true);
+    expect(
+      r2.changes.some(
+        (c) => c.ruleId === 'security-scope-required-removed' && c.severity === 'info',
+      ),
+    ).toBe(true);
   });
 });
 
 describe('components doctrine (§10.5b)', () => {
   it('unreachable components are not diffed', async () => {
-    const doc = (unused: string) => DOC(
-      `    Used:
+    const doc = (unused: string) =>
+      DOC(
+        `    Used:
       type: object
       properties:
         a:
           type: string
 ${unused}`,
-      `  /a:
+        `  /a:
     get:
       responses:
         '200':
@@ -401,22 +437,27 @@ ${unused}`,
             application/json:
               schema:
                 $ref: '#/components/schemas/Used'`,
-    );
+      );
     const p = specPair(
-      doc('    Unreachable:\n      type: object\n      properties:\n        z:\n          type: string\n'),
-      doc('    Unreachable:\n      type: object\n      properties:\n        z:\n          type: number\n'),
+      doc(
+        '    Unreachable:\n      type: object\n      properties:\n        z:\n          type: string\n',
+      ),
+      doc(
+        '    Unreachable:\n      type: object\n      properties:\n        z:\n          type: number\n',
+      ),
     );
     const { report } = await analyze(p.old, p.cur, {});
     expect(report.changes).toHaveLength(0);
   });
 
   it('usageCount is stamped on component changes', async () => {
-    const doc = (props: string) => DOC(
-      `    U:
+    const doc = (props: string) =>
+      DOC(
+        `    U:
       type: object
       properties:
 ${props}`,
-      `  /a:
+        `  /a:
     get:
       responses:
         '200':
@@ -425,8 +466,11 @@ ${props}`,
             application/json:
               schema:
                 $ref: '#/components/schemas/U'`,
+      );
+    const p = specPair(
+      doc('        x:\n          type: string\n        y:\n          type: string\n'),
+      doc('        x:\n          type: string\n'),
     );
-    const p = specPair(doc('        x:\n          type: string\n        y:\n          type: string\n'), doc('        x:\n          type: string\n'));
     const { report } = await analyze(p.old, p.cur, {});
     const change = report.changes.find((c) => c.ruleId === 'property-removed');
     expect(change?.location.componentName).toBe('U');

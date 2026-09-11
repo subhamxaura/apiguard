@@ -24,19 +24,28 @@ describe('normalizeDocument', () => {
   });
 
   it('converts boolean exclusiveMinimum to numeric bound (§11.2)', () => {
-    const out = normalizeDocument({ minimum: 5, exclusiveMinimum: true }) as Record<string, unknown>;
+    const out = normalizeDocument({ minimum: 5, exclusiveMinimum: true }) as Record<
+      string,
+      unknown
+    >;
     expect(out.exclusiveMinimum).toBe(5);
     expect(out.minimum).toBeUndefined();
   });
 
   it('converts boolean exclusiveMaximum to numeric bound', () => {
-    const out = normalizeDocument({ maximum: 9, exclusiveMaximum: true }) as Record<string, unknown>;
+    const out = normalizeDocument({ maximum: 9, exclusiveMaximum: true }) as Record<
+      string,
+      unknown
+    >;
     expect(out.exclusiveMaximum).toBe(9);
     expect(out.maximum).toBeUndefined();
   });
 
   it('drops explicit false exclusive flags', () => {
-    const out = normalizeDocument({ minimum: 5, exclusiveMinimum: false }) as Record<string, unknown>;
+    const out = normalizeDocument({ minimum: 5, exclusiveMinimum: false }) as Record<
+      string,
+      unknown
+    >;
     expect(out.minimum).toBe(5);
     expect(out.exclusiveMinimum).toBeUndefined();
   });

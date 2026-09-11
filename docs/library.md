@@ -16,10 +16,10 @@ const { report, ignored } = await analyze('baseline.yaml', 'current.yaml', {
   showIgnored: false,
 });
 
-report.summary.bySeverity.error;   // breaking count
-report.changes;                    // sorted, deduped ApiChange[]
-report.semver;                     // { bump: 'major', reason, triggers }
-ignored;                           // changes suppressed by ignore rules
+report.summary.bySeverity.error; // breaking count
+report.changes; // sorted, deduped ApiChange[]
+report.semver; // { bump: 'major', reason, triggers }
+ignored; // changes suppressed by ignore rules
 ```
 
 ## Purity guarantees
@@ -42,9 +42,9 @@ The JSON contract is the exported type surface:
 
 ```ts
 const { spec, validation } = await validateSpec('openapi.yaml');
-spec.sha256;                    // content hash for caching
-validation.ok;                  // false when semantic issues exist
-validation.issues;              // { level, message, pointer }[]
+spec.sha256; // content hash for caching
+validation.ok; // false when semantic issues exist
+validation.issues; // { level, message, pointer }[]
 ```
 
 Structural problems throw `SpecLoadError` (the CLI's exit-3 class) rather than returning.

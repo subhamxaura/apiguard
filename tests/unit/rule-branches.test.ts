@@ -25,7 +25,9 @@ function pair(oldYaml: string, newYaml: string): [string, string] {
 /** Dedent caller schema text (first line sets the base), then re-indent under `schema:`. */
 const indent = (s: string, n: number) => {
   const lines = s.split('\n');
-  const base = Math.min(...lines.filter((l) => l.trim() !== '').map((l) => l.match(/^ */)?.[0].length ?? 0));
+  const base = Math.min(
+    ...lines.filter((l) => l.trim() !== '').map((l) => l.match(/^ */)?.[0].length ?? 0),
+  );
   return lines.map((l) => (l.trim() === '' ? '' : ' '.repeat(n) + l.slice(base))).join('\n');
 };
 
@@ -77,7 +79,9 @@ describe('§10.4 rule branches via analyze()', () => {
   });
 
   it('additionalProperties map close/open (§10.4)', async () => {
-    const [o, n] = pair(...DOC('        type: object', '        type: object\n        additionalProperties: false'));
+    const [o, n] = pair(
+      ...DOC('        type: object', '        type: object\n        additionalProperties: false'),
+    );
     const { report } = await analyze(o, n, {});
     expect(rulesOf(report)).toContain('map-closed');
 
@@ -91,7 +95,10 @@ describe('§10.4 rule branches via analyze()', () => {
   it('composition member add/remove (§10.4)', async () => {
     const base = (members: string) => `        allOf:\n${members}`;
     const [o, n] = pair(
-      ...DOC(base('          - type: object'), base('          - type: object\n          - type: string')),
+      ...DOC(
+        base('          - type: object'),
+        base('          - type: object\n          - type: string'),
+      ),
     );
     const { report } = await analyze(o, n, {});
     expect(rulesOf(report)).toContain('allOf-member-added');
@@ -114,7 +121,12 @@ describe('§10.4 rule branches via analyze()', () => {
   });
 
   it('discriminator added / changed (§10.4)', async () => {
-    const [o, n] = pair(...DOC('        type: object', '        type: object\n        discriminator: {propertyName: kind}'));
+    const [o, n] = pair(
+      ...DOC(
+        '        type: object',
+        '        type: object\n        discriminator: {propertyName: kind}',
+      ),
+    );
     const { report } = await analyze(o, n, {});
     expect(rulesOf(report)).toContain('discriminator-added');
 
@@ -138,20 +150,28 @@ describe('§10.4 rule branches via analyze()', () => {
 
     // 5 → 7 tightens (error)
     const [o2, n2] = pair(
-      ...DOC('        type: string\n        minLength: 5', '        type: string\n        minLength: 7'),
+      ...DOC(
+        '        type: string\n        minLength: 5',
+        '        type: string\n        minLength: 7',
+      ),
     );
     const { report: r2 } = await analyze(o2, n2, {});
     expect(rulesOf(r2)).toContain('constraint-tightened');
 
     // 5 → 3 relaxes (info)
     const [o3, n3] = pair(
-      ...DOC('        type: string\n        minLength: 5', '        type: string\n        minLength: 3'),
+      ...DOC(
+        '        type: string\n        minLength: 5',
+        '        type: string\n        minLength: 3',
+      ),
     );
     const { report: r3 } = await analyze(o3, n3, {});
     expect(rulesOf(r3)).toContain('constraint-relaxed');
 
     // removal → constraint-removed (info)
-    const [o4, n4] = pair(...DOC('        type: string\n        minLength: 5', '        type: string'));
+    const [o4, n4] = pair(
+      ...DOC('        type: string\n        minLength: 5', '        type: string'),
+    );
     const { report: r4 } = await analyze(o4, n4, {});
     expect(rulesOf(r4)).toContain('constraint-removed');
   });
@@ -169,7 +189,10 @@ describe('§10.4 rule branches via analyze()', () => {
 
   it('schema metadata (description) change fires schema-description-changed', async () => {
     const [o, n] = pair(
-      ...DOC('        type: object\n        description: before', '        type: object\n        description: after'),
+      ...DOC(
+        '        type: object\n        description: before',
+        '        type: object\n        description: after',
+      ),
     );
     const { report } = await analyze(o, n, {});
     expect(rulesOf(report)).toContain('schema-description-changed');
@@ -189,7 +212,12 @@ describe('§10.4 rule branches via analyze()', () => {
 
 describe('§10.4 remaining branches: max bounds, multipleOf, items-level, component doctrine', () => {
   it('maximum raise relaxes; exclusiveMinimum numeric form (§11.2/§11.3)', async () => {
-    const [o, n] = pair(...DOC('        type: number\n        maximum: 10', '        type: number\n        maximum: 20'));
+    const [o, n] = pair(
+      ...DOC(
+        '        type: number\n        maximum: 10',
+        '        type: number\n        maximum: 20',
+      ),
+    );
     const { report } = await analyze(o, n, {});
     expect(rulesOf(report)).toContain('constraint-relaxed');
 
@@ -206,9 +234,18 @@ describe('§10.4 remaining branches: max bounds, multipleOf, items-level, compon
   });
 
   it('multipleOf change fires (§10.4)', async () => {
-    const [o, n] = pair(...DOC('        type: number\n        multipleOf: 5', '        type: number\n        multipleOf: 10'));
+    const [o, n] = pair(
+      ...DOC(
+        '        type: number\n        multipleOf: 5',
+        '        type: number\n        multipleOf: 10',
+      ),
+    );
     const { report } = await analyze(o, n, {});
-    expect(report.changes.some((c) => c.ruleId === 'constraint-tightened' || c.ruleId === 'constraint-relaxed')).toBe(true);
+    expect(
+      report.changes.some(
+        (c) => c.ruleId === 'constraint-tightened' || c.ruleId === 'constraint-relaxed',
+      ),
+    ).toBe(true);
   });
 
   it('array items type change fires property-type-changed via items recursion', async () => {

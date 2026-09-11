@@ -55,9 +55,7 @@ describe('composition rules (§10.4)', () => {
 
   it('allOf-member-removed on shrink', async () => {
     const [o, n] = pair(
-      DOC(
-        'allOf:\n  - type: object\n  - type: object\n  - type: object',
-      ),
+      DOC('allOf:\n  - type: object\n  - type: object\n  - type: object'),
       DOC('allOf:\n  - type: object'),
     );
     const { report } = await analyze(o, n, {});
@@ -83,7 +81,10 @@ describe('composition rules (§10.4)', () => {
   });
 
   it('discriminator-added / -changed / -removed', async () => {
-    const [o1, n1] = pair(DOC('type: object\nproperties:\n  a: {type: string}'), DOC('type: object\ndiscriminator:\n  propertyName: kind\nproperties:\n  a: {type: string}'));
+    const [o1, n1] = pair(
+      DOC('type: object\nproperties:\n  a: {type: string}'),
+      DOC('type: object\ndiscriminator:\n  propertyName: kind\nproperties:\n  a: {type: string}'),
+    );
     const r1 = await analyze(o1, n1, {});
     expect(idsOf(r1.report)).toContain('discriminator-added');
 
@@ -104,7 +105,9 @@ describe('composition rules (§10.4)', () => {
     const bigObj = JSON.stringify({ k1: 'x'.repeat(60), k2: 'y'.repeat(60) });
     const [o, n] = pair(
       DOC(`type: object\nproperties:\n  a:\n    type: object\n    default: ${bigObj}`),
-      DOC(`type: object\nproperties:\n  a:\n    type: object\n    default: ${JSON.stringify({ k1: 'x'.repeat(60), k2: 'z'.repeat(60) })}`),
+      DOC(
+        `type: object\nproperties:\n  a:\n    type: object\n    default: ${JSON.stringify({ k1: 'x'.repeat(60), k2: 'z'.repeat(60) })}`,
+      ),
     );
     const { report } = await analyze(o, n, {});
     const hit = report.changes.find((c) => c.ruleId === 'property-default-changed');

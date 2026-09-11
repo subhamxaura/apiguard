@@ -76,4 +76,3 @@ components:
       properties:
         next:
           $ref: '#/components/schemas/Node'
-

@@ -44,17 +44,29 @@ describe('ignore engine (§14.3)', () => {
 
   it('operation entries are exact "METHOD /path"', () => {
     const config = cfg({ operations: ['GET /health', 'POST /users'] });
-    expect(isIgnored(c({ ruleId: 'removed-method', path: '/health', method: 'GET' }), config)).toBe(true);
-    expect(isIgnored(c({ ruleId: 'removed-method', path: '/health', method: 'POST' }), config)).toBe(false);
-    expect(isIgnored(c({ ruleId: 'removed-method', path: '/healthz', method: 'GET' }), config)).toBe(false);
+    expect(isIgnored(c({ ruleId: 'removed-method', path: '/health', method: 'GET' }), config)).toBe(
+      true,
+    );
+    expect(
+      isIgnored(c({ ruleId: 'removed-method', path: '/health', method: 'POST' }), config),
+    ).toBe(false);
+    expect(
+      isIgnored(c({ ruleId: 'removed-method', path: '/healthz', method: 'GET' }), config),
+    ).toBe(false);
   });
 
   it('schema globs match componentName and pointer prefixes', () => {
     const config = cfg({ schemas: ['InternalModel', 'components/schemas/V1*'] });
-    expect(isIgnored(c({ ruleId: 'property-removed', componentName: 'InternalModel' }), config)).toBe(true);
+    expect(
+      isIgnored(c({ ruleId: 'property-removed', componentName: 'InternalModel' }), config),
+    ).toBe(true);
     expect(
       isIgnored(
-        c({ ruleId: 'property-removed', componentName: 'V1Legacy', pointerNew: '#/components/schemas/V1Legacy/props/x' }),
+        c({
+          ruleId: 'property-removed',
+          componentName: 'V1Legacy',
+          pointerNew: '#/components/schemas/V1Legacy/props/x',
+        }),
         config,
       ),
     ).toBe(true);
@@ -64,7 +76,10 @@ describe('ignore engine (§14.3)', () => {
   it('schema pointer fallback extracts root name after /components/schemas/', () => {
     const config = cfg({ schemas: ['Hidden'] });
     expect(
-      isIgnored(c({ ruleId: 'property-removed', pointerNew: '#/components/schemas/Hidden/properties/x' }), config),
+      isIgnored(
+        c({ ruleId: 'property-removed', pointerNew: '#/components/schemas/Hidden/properties/x' }),
+        config,
+      ),
     ).toBe(true);
   });
 

@@ -77,4 +77,3 @@ components:
           properties:
             card:
               type: string
-

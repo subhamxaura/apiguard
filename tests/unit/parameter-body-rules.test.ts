@@ -22,8 +22,7 @@ function pair(oldYaml: string, newYaml: string): [string, string] {
   return [path.join(d, 'old.yaml'), path.join(d, 'new.yaml')];
 }
 
-const DOC = (op: string) =>
-  `openapi: 3.0.3\ninfo: {title: API, version: '1.0'}\npaths:\n${op}`;
+const DOC = (op: string) => `openapi: 3.0.3\ninfo: {title: API, version: '1.0'}\npaths:\n${op}`;
 
 const GET_WITH_PARAMS = (params: string) =>
   `  /users/{id}:
@@ -79,8 +78,16 @@ describe('parameter lifecycle rules (§10.3)', () => {
 
   it('parameter-made-required and parameter-metadata-changed fire', async () => {
     const [o, n] = pair(
-      DOC(GET_WITH_PARAMS(param('filter', 'required: false\ndescription: a filter\nschema:\n  type: string'))),
-      DOC(GET_WITH_PARAMS(param('filter', 'required: true\ndescription: better\nschema:\n  type: string'))),
+      DOC(
+        GET_WITH_PARAMS(
+          param('filter', 'required: false\ndescription: a filter\nschema:\n  type: string'),
+        ),
+      ),
+      DOC(
+        GET_WITH_PARAMS(
+          param('filter', 'required: true\ndescription: better\nschema:\n  type: string'),
+        ),
+      ),
     );
     const { report } = await analyze(o, n, {});
     const ids = report.changes.map((c) => c.ruleId);

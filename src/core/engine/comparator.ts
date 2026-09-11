@@ -49,7 +49,8 @@ export function boundDirection(
 ): Tighter {
   if (oldV === undefined && newV === undefined) return 'same';
   if (oldV === newV) return 'same';
-  if (oldV === undefined) return newV === undefined ? 'same' : kind === 'lower' ? 'tightened' : 'tightened';
+  if (oldV === undefined)
+    return newV === undefined ? 'same' : kind === 'lower' ? 'tightened' : 'tightened';
   if (newV === undefined) return 'relaxed';
   if (oldV === newV) return 'same';
   if (kind === 'lower') return newV > oldV ? 'tightened' : 'relaxed';

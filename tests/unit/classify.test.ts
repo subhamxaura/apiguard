@@ -17,7 +17,9 @@ describe('§10.5 severity doctrine', () => {
 
   it('property-removed: request-body → warning, error only when required', () => {
     expect(resolveContextSeverity('property-removed', 'request-body', {})).toBe('warning');
-    expect(resolveContextSeverity('property-removed', 'request-body', { wasRequired: true })).toBe('error');
+    expect(resolveContextSeverity('property-removed', 'request-body', { wasRequired: true })).toBe(
+      'error',
+    );
   });
 
   it('property-removed: header params are protocol-relevant → error (§10.5)', () => {
@@ -54,7 +56,9 @@ describe('config overrides (§14.3)', () => {
   const rules = { ...DEFAULT_CONFIG.rules };
 
   it('plain key overrides all contexts', () => {
-    const out = classify('removed-path', 'operation', { rules: { ...rules, 'removed-path': 'warning' } });
+    const out = classify('removed-path', 'operation', {
+      rules: { ...rules, 'removed-path': 'warning' },
+    });
     expect(out?.severity).toBe('warning');
   });
 
@@ -66,7 +70,9 @@ describe('config overrides (§14.3)', () => {
   });
 
   it("'off' disables the rule (null)", () => {
-    expect(classify('removed-path', 'operation', { rules: { ...rules, 'removed-path': 'off' } })).toBeNull();
+    expect(
+      classify('removed-path', 'operation', { rules: { ...rules, 'removed-path': 'off' } }),
+    ).toBeNull();
     expect(
       classify('property-removed', 'request-body', {
         rules: { ...rules, 'property-removed@request-body': 'off' },

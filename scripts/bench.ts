@@ -87,9 +87,10 @@ async function main(): Promise<void> {
   results.push(ids1 === ids2);
 
   // single huge schema: 2000 properties, one type change
-  const many = Array.from({ length: 2000 }, (_, j) => `                q${j}: {type: string}`).join('\n');
-  const huge =
-    `openapi: 3.0.3\ninfo: {title: H, version: '1.0'}\npaths:\n  /h:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n${many}\n`;
+  const many = Array.from({ length: 2000 }, (_, j) => `                q${j}: {type: string}`).join(
+    '\n',
+  );
+  const huge = `openapi: 3.0.3\ninfo: {title: H, version: '1.0'}\npaths:\n  /h:\n    get:\n      responses:\n        '200':\n          description: OK\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n${many}\n`;
   const hugeA = path.join(d, 'huge-a.yaml');
   const hugeB = path.join(d, 'huge-b.yaml');
   fs.writeFileSync(hugeA, huge);

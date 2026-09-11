@@ -39,7 +39,10 @@ export function isIgnored(change: ApiChange, config: ResolvedConfig): boolean {
   if (ignore.schemas.length > 0) {
     const name = change.location.componentName;
     if (name && micromatch.isMatch(name, ignore.schemas)) return true;
-    const pointer = (change.location.pointerNew || change.location.pointerOld || '').replace(/^#\//, '');
+    const pointer = (change.location.pointerNew || change.location.pointerOld || '').replace(
+      /^#\//,
+      '',
+    );
     const SCHEMAS_SEG = 'components/schemas/';
     if (pointer && (pointer.includes(`/${SCHEMAS_SEG}`) || pointer.startsWith(SCHEMAS_SEG))) {
       const after = pointer.split(SCHEMAS_SEG)[1] ?? '';
@@ -64,7 +67,7 @@ export function isIgnored(change: ApiChange, config: ResolvedConfig): boolean {
   }
 
   // --- paths: globs against the path template (all methods)
-  if (ignore.paths.length > 0 && path && path !== '' ) {
+  if (ignore.paths.length > 0 && path && path !== '') {
     if (micromatch.isMatch(path, ignore.paths)) return true;
   }
 

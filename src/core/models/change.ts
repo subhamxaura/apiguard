@@ -1,12 +1,7 @@
 /** Core change taxonomy and change records per spec §4/§8. */
 
 export type Severity = 'error' | 'warning' | 'info';
-export type ChangeKind =
-  | 'addition'
-  | 'removal'
-  | 'modification'
-  | 'relaxation'
-  | 'documentation';
+export type ChangeKind = 'addition' | 'removal' | 'modification' | 'relaxation' | 'documentation';
 
 /** Config-facing severities: the three above plus 'off' to disable a rule. */
 export type ConfigSeverity = Severity | 'off';

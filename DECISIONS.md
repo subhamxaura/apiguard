@@ -33,7 +33,7 @@ Every non-obvious decision, its reason, and date. Newest entries last per milest
   crashed `JSON.parse` on any object value longer than 80 chars (real crash path from a large
   default). Truncation now emits a string marker `…` suffix instead of re-parsing.
 - **`satisfiesAny` semantics** (2026-09-10): new requirement satisfies old credentials when it
-  demands a *subset* of previously-required scopes (narrower = more permissive). Old `[read]` →
+  demands a _subset_ of previously-required scopes (narrower = more permissive). Old `[read]` →
   new `[read, write]` is therefore `security-requirement-changed` (error), not a scope-added row.
 - **Component diff diffs each schema once with strictest usage class** (2026-09-10): usage is
   scanned across request (send), response/parameters (parse), and webhooks (parse); parse wins
@@ -93,3 +93,18 @@ Every non-obvious decision, its reason, and date. Newest entries last per milest
 - **Status note (3 lines):** full docs set, 4 CI workflows (test/lint/release/self-test),
   semantic-release config, npm pack audit clean (13 files, correct bin), CLI smoke-tested
   against fixtures (exit 1 breaking / 0 clean). 302 unit + 4 e2e tests green.
+
+## M7 — Hardening & Final DoD
+
+- **Determinism fuzz is a unit test** (2026-09-11): 20 seeded key-order shuffles + JSON-vs-YAML
+  representation churn must produce identical change-id sequences; a same-input rerun must be
+  byte-identical. Caught nothing new — the §5.1 invariants hold.
+- **Registry wording helpers are directly unit-tested** (2026-09-11): fmt/sideLabel/
+  whereLabel/nameOf had branches reachable only through specific emit shapes; direct template
+  tests pin them (plus registry integrity: unique ids, getRule throws on unknown).
+- **Duplicate YAML map keys are a hard config error** (2026-09-11): `yaml` rejects them at
+  parse; documented as the fail-loud behavior instead of silent last-wins.
+- **Status note (3 lines):** FINAL. 326 unit + 4 e2e tests; gates: lint ✓ format ✓ typecheck ✓
+  coverage 94.28/85.54/96.5/96.53 (stmts/branches/funcs/lines) ✓ bench ALL PASS (300ms-668ms vs
+  15-20s budgets) ✓ bundle e2e ✓ CLI smoke (exit 1 breaking / 0 clean) ✓ npm pack 13 files ✓.
+  All milestones M0-M7 complete.

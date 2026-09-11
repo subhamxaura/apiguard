@@ -36,7 +36,13 @@ const CONSTRAINT_LABEL: Record<string, string> = {
   exclusiveMaximum: 'exclusiveMaximum',
 };
 
-const NUMERIC_KEYS = new Set(['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf']);
+const NUMERIC_KEYS = new Set([
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+]);
 
 /** Partial location assembled by callers; pointerOld/pointerNew are added per-fact. */
 export type LocationBase = Omit<ChangeLocation, 'pointerOld' | 'pointerNew'>;
@@ -59,7 +65,13 @@ export function diffSchemaNode(
   // deeper refs resolve pairwise so ref-target content changes are caught (§11.4).
   if (isRefNode(oldSchema) || isRefNode(newSchema)) {
     if (depth === 0) return;
-    const pair = dereffedPair(oldSchema, newSchema, ctx.baselineIndex.schemas, ctx.currentIndex.schemas, seen);
+    const pair = dereffedPair(
+      oldSchema,
+      newSchema,
+      ctx.baselineIndex.schemas,
+      ctx.currentIndex.schemas,
+      seen,
+    );
     if (!pair) return;
     oldSchema = pair.old;
     newSchema = pair.new;
@@ -80,7 +92,11 @@ export function diffSchemaNode(
   if (!deepEqual(oldSchema.format, newSchema.format)) {
     emit(ctx, {
       ruleId: 'property-format-changed',
-      location: { ...location, pointerOld: `${pointerOld}/format`, pointerNew: `${pointerNew}/format` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/format`,
+        pointerNew: `${pointerNew}/format`,
+      },
       oldValue: oldSchema.format,
       newValue: newSchema.format,
     });
@@ -90,7 +106,11 @@ export function diffSchemaNode(
   if (!deepEqual(oldSchema.default, newSchema.default)) {
     emit(ctx, {
       ruleId: 'property-default-changed',
-      location: { ...location, pointerOld: `${pointerOld}/default`, pointerNew: `${pointerNew}/default` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/default`,
+        pointerNew: `${pointerNew}/default`,
+      },
       oldValue: compact(oldSchema.default),
       newValue: compact(newSchema.default),
     });
@@ -172,11 +192,19 @@ export function diffSchemaNode(
       // existing optional stays optional; recurse
     }
 
-    diffSchemaNode(ctx, oldChild, newChild, `${pointerOld}/properties/${esc(propName)}`, `${pointerNew}/properties/${esc(propName)}`, location, {
-      requiredOld: stringArray(oldChild.required),
-      requiredNew: stringArray(newChild.required),
-      sideClass: opts.sideClass,
-    });
+    diffSchemaNode(
+      ctx,
+      oldChild,
+      newChild,
+      `${pointerOld}/properties/${esc(propName)}`,
+      `${pointerNew}/properties/${esc(propName)}`,
+      location,
+      {
+        requiredOld: stringArray(oldChild.required),
+        requiredNew: stringArray(newChild.required),
+        sideClass: opts.sideClass,
+      },
+    );
   }
 
   for (const propName of Object.keys(newProps).sort()) {
@@ -213,11 +241,19 @@ export function diffSchemaNode(
   const oldItems = isObject(oldSchema.items) ? oldSchema.items : undefined;
   const newItems = isObject(newSchema.items) ? newSchema.items : undefined;
   if (oldItems && newItems) {
-    diffSchemaNode(ctx, oldItems, newItems, `${pointerOld}/items`, `${pointerNew}/items`, location, {
-      requiredOld: stringArrayOf(oldItems.required),
-      requiredNew: stringArrayOf(newItems.required),
-      sideClass: opts.sideClass,
-    });
+    diffSchemaNode(
+      ctx,
+      oldItems,
+      newItems,
+      `${pointerOld}/items`,
+      `${pointerNew}/items`,
+      location,
+      {
+        requiredOld: stringArrayOf(oldItems.required),
+        requiredNew: stringArrayOf(newItems.required),
+        sideClass: opts.sideClass,
+      },
+    );
   }
 
   // ---- required array shrink (either context)
@@ -366,7 +402,8 @@ function diffConstraints(
     if (NUMERIC_KEYS.has(key)) {
       const o = num(oldV);
       const n = num(newV);
-      const isLower = (LOWER_BOUNDS as readonly string[]).includes(key) || key === 'exclusiveMinimum';
+      const isLower =
+        (LOWER_BOUNDS as readonly string[]).includes(key) || key === 'exclusiveMinimum';
       const dir = boundDirection(isLower ? 'lower' : 'upper', o, n);
       emit(ctx, {
         ruleId: dir === 'tightened' ? 'constraint-tightened' : 'constraint-relaxed',
@@ -408,12 +445,20 @@ function diffAdditionalProperties(
   if (!oldClosed && newClosed) {
     emit(ctx, {
       ruleId: 'map-closed',
-      location: { ...location, pointerOld: `${pointerOld}/additionalProperties`, pointerNew: `${pointerNew}/additionalProperties` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/additionalProperties`,
+        pointerNew: `${pointerNew}/additionalProperties`,
+      },
     });
   } else if (oldClosed && !newClosed) {
     emit(ctx, {
       ruleId: 'map-opened',
-      location: { ...location, pointerOld: `${pointerOld}/additionalProperties`, pointerNew: `${pointerNew}/additionalProperties` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/additionalProperties`,
+        pointerNew: `${pointerNew}/additionalProperties`,
+      },
     });
   }
 }
@@ -440,14 +485,22 @@ function diffComposition(
   if (newAll.length > oldAll.length) {
     emit(ctx, {
       ruleId: 'allOf-member-added',
-      location: { ...location, pointerOld: `${pointerOld}/allOf`, pointerNew: `${pointerNew}/allOf` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/allOf`,
+        pointerNew: `${pointerNew}/allOf`,
+      },
       oldValue: oldAll.length,
       newValue: newAll.length,
     });
   } else if (newAll.length < oldAll.length) {
     emit(ctx, {
       ruleId: 'allOf-member-removed',
-      location: { ...location, pointerOld: `${pointerOld}/allOf`, pointerNew: `${pointerNew}/allOf` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/allOf`,
+        pointerNew: `${pointerNew}/allOf`,
+      },
       oldValue: oldAll.length,
       newValue: newAll.length,
     });
@@ -460,14 +513,22 @@ function diffComposition(
     if (newArr.length > oldArr.length) {
       emit(ctx, {
         ruleId: 'anyOf-oneOf-member-added',
-        location: { ...location, pointerOld: `${pointerOld}/${key}`, pointerNew: `${pointerNew}/${key}` },
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/${key}`,
+          pointerNew: `${pointerNew}/${key}`,
+        },
         oldValue: oldArr.length,
         newValue: newArr.length,
       });
     } else if (newArr.length < oldArr.length) {
       emit(ctx, {
         ruleId: 'anyOf-oneOf-member-removed',
-        location: { ...location, pointerOld: `${pointerOld}/${key}`, pointerNew: `${pointerNew}/${key}` },
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/${key}`,
+          pointerNew: `${pointerNew}/${key}`,
+        },
         oldValue: oldArr.length,
         newValue: newArr.length,
       });
@@ -490,20 +551,32 @@ function diffDiscriminator(
   if (!oldDisc && newDisc) {
     emit(ctx, {
       ruleId: 'discriminator-added',
-      location: { ...location, pointerOld: `${pointerOld}/discriminator`, pointerNew: `${pointerNew}/discriminator` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`,
+      },
       newValue: newDisc.propertyName,
     });
   } else if (oldDisc && newDisc && !deepEqual(oldDisc, newDisc)) {
     emit(ctx, {
       ruleId: 'discriminator-changed',
-      location: { ...location, pointerOld: `${pointerOld}/discriminator`, pointerNew: `${pointerNew}/discriminator` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`,
+      },
       oldValue: oldDisc.propertyName,
       newValue: newDisc.propertyName,
     });
   } else if (oldDisc && !newDisc) {
     emit(ctx, {
       ruleId: 'discriminator-changed',
-      location: { ...location, pointerOld: `${pointerOld}/discriminator`, pointerNew: `${pointerNew}/discriminator` },
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`,
+      },
       oldValue: oldDisc.propertyName,
       newValue: undefined,
     });

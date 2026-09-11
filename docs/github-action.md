@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }    # full history: merge-base needs it
+        with: { fetch-depth: 0 } # full history: merge-base needs it
       - uses: apiguard/action@v1
         with:
           current: openapi.yaml
@@ -32,24 +32,24 @@ a readable message — pass an explicit `baseline` for that case.
 
 ## Inputs
 
-| Input | Default | Meaning |
-|---|---|---|
-| `current` | `openapi.yaml` | The PR's spec path |
-| `baseline` | merge-base | Explicit baseline spec path |
-| `base` | `origin/main` | Ref for merge-base resolution |
-| `fail-on` | `error` | `error` or `never` — whether breaking changes fail the step |
-| `config` | – | Path to `apiguard.yaml` (rules + ignores) |
-| `comment-pr` | `false` | Post the report as a PR comment (needs `token`) |
-| `token` | – | `github.token` when `comment-pr: true` |
-| `markdown-file` | – | Also write the markdown report to this path |
+| Input           | Default        | Meaning                                                     |
+| --------------- | -------------- | ----------------------------------------------------------- |
+| `current`       | `openapi.yaml` | The PR's spec path                                          |
+| `baseline`      | merge-base     | Explicit baseline spec path                                 |
+| `base`          | `origin/main`  | Ref for merge-base resolution                               |
+| `fail-on`       | `error`        | `error` or `never` — whether breaking changes fail the step |
+| `config`        | –              | Path to `apiguard.yaml` (rules + ignores)                   |
+| `comment-pr`    | `false`        | Post the report as a PR comment (needs `token`)             |
+| `token`         | –              | `github.token` when `comment-pr: true`                      |
+| `markdown-file` | –              | Also write the markdown report to this path                 |
 
 ## Outputs
 
-| Output | Meaning |
-|---|---|
-| `breaking` | Number of error-severity changes |
-| `warnings` | Number of warning-severity changes |
-| `verdict` | `fail` or `pass` under the fail-on policy |
+| Output              | Meaning                                             |
+| ------------------- | --------------------------------------------------- |
+| `breaking`          | Number of error-severity changes                    |
+| `warnings`          | Number of warning-severity changes                  |
+| `verdict`           | `fail` or `pass` under the fail-on policy           |
 | `suggested-version` | e.g. `major (3 breaking rules)` or `no bump needed` |
 
 ## Job summary
@@ -64,10 +64,10 @@ The step fails when `verdict` is `fail` (breaking changes under `fail-on: error`
 without blocking — e.g. during a migration — set `fail-on: never` and branch on the output:
 
 ```yaml
-      - uses: apiguard/action@v1
-        id: guard
-        with: { fail-on: never, current: openapi.yaml }
-      - run: echo "breaking=${{ steps.guard.outputs.breaking }}"
+- uses: apiguard/action@v1
+  id: guard
+  with: { fail-on: never, current: openapi.yaml }
+- run: echo "breaking=${{ steps.guard.outputs.breaking }}"
 ```
 
 ## Self-test

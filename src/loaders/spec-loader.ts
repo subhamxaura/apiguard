@@ -111,7 +111,10 @@ export function findExternalFileRefs(document: unknown, specDir: string): string
  * Load a spec from disk: parse (YAML/JSON), guard remote/external refs, bundle local refs,
  * normalize. Returns the spec with the normalized view used by the engine.
  */
-export async function loadSpec(filePath: string, options: LoadOptions = {}): Promise<NormalizedSpec> {
+export async function loadSpec(
+  filePath: string,
+  options: LoadOptions = {},
+): Promise<NormalizedSpec> {
   const abs = path.resolve(filePath);
   let text: string;
   try {

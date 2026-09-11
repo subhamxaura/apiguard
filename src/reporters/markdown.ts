@@ -75,7 +75,9 @@ export function renderMarkdown(report: DiffReport): string {
 
   // footer
   lines.push('');
-  lines.push(`<sub>apiguard v${report.tool.version} · baseline ${report.baseline.sha256.slice(0, 8)} → current ${report.current.sha256.slice(0, 8)}</sub>`);
+  lines.push(
+    `<sub>apiguard v${report.tool.version} · baseline ${report.baseline.sha256.slice(0, 8)} → current ${report.current.sha256.slice(0, 8)}</sub>`,
+  );
   return lines.join('\n');
 }
 

@@ -3,7 +3,12 @@
  * version checks, remote/external $ref denials — each maps to a distinct SpecLoadError.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadSpec, parseSpecText, findRemoteRefs, findExternalFileRefs } from '../../src/loaders/spec-loader.js';
+import {
+  loadSpec,
+  parseSpecText,
+  findRemoteRefs,
+  findExternalFileRefs,
+} from '../../src/loaders/spec-loader.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,10 +32,14 @@ describe('parseSpecText', () => {
     expect(() => parseSpecText('{nope', 'spec.json')).toThrow(/spec\.json: JSON parse error/);
   });
   it('throws SpecLoadError with source for invalid YAML', () => {
-    expect(() => parseSpecText('a: [unclosed', 'spec.yaml')).toThrow(/spec\.yaml: YAML parse error/);
+    expect(() => parseSpecText('a: [unclosed', 'spec.yaml')).toThrow(
+      /spec\.yaml: YAML parse error/,
+    );
   });
   it('rejects non-mapping roots with a descriptive message', () => {
-    expect(() => parseSpecText('- a\n- b', 'spec.yaml')).toThrow(/root must be a mapping.*got an array/s);
+    expect(() => parseSpecText('- a\n- b', 'spec.yaml')).toThrow(
+      /root must be a mapping.*got an array/s,
+    );
     expect(() => parseSpecText('42', 'spec.yaml')).toThrow(/got a number/);
     expect(() => parseSpecText('true', 'spec.yaml')).toThrow(/got a boolean/);
     expect(() => parseSpecText('null', 'spec.yaml')).toThrow(/got null/);
@@ -48,7 +57,11 @@ describe('findRemoteRefs / findExternalFileRefs', () => {
         '/a': {
           get: {
             responses: {
-              '200': { content: { 'application/json': { schema: { $ref: 'https://evil.example.com/x.json#/Y' } } } },
+              '200': {
+                content: {
+                  'application/json': { schema: { $ref: 'https://evil.example.com/x.json#/Y' } },
+                },
+              },
             },
           },
         },
@@ -75,8 +88,10 @@ describe('findRemoteRefs / findExternalFileRefs', () => {
 
   it('error messages truncate long ref lists with an ellipsis (4+ refs)', async () => {
     const refs = [1, 2, 3, 4]
-      .map((i) => `  - url-x${i}:
-      type: _scan_dummy_${i}`)
+      .map(
+        (i) => `  - url-x${i}:
+      type: _scan_dummy_${i}`,
+      )
       .join('\n');
     void refs;
     const schemeLines = [1, 2, 3, 4]
@@ -87,16 +102,15 @@ describe('findRemoteRefs / findExternalFileRefs', () => {
       .join('\n');
     void schemeLines;
     const refLines = [1, 2, 3, 4]
-      .map(
-        (i) =>
-          `    S${i}:\n      $ref: 'https://h${i}.example.com/schema${i}.json#/A'`,
-      )
+      .map((i) => `    S${i}:\n      $ref: 'https://h${i}.example.com/schema${i}.json#/A'`)
       .join('\n');
     const p = write(
       'many-remote.yaml',
       `openapi: 3.0.3\ninfo: {title: A, version: '1.0'}\npaths: {}\ncomponents:\n  schemas:\n${refLines}\n`,
     );
-    await expect(loadSpec(p)).rejects.toThrow(/remote \$ref\(s\) denied by default \(found 4: .*…/s);
+    await expect(loadSpec(p)).rejects.toThrow(
+      /remote \$ref\(s\) denied by default \(found 4: .*…/s,
+    );
   });
   it('ignores in-directory and local refs', () => {
     const doc = { components: { schemas: { A: { $ref: '#/components/schemas/B' } } } };
@@ -134,7 +148,9 @@ describe('loadSpec error handling', () => {
       'remote-ok.yaml',
       `openapi: 3.0.3\ninfo: {title: A, version: '1.0'}\npaths: {}\n`,
     );
-    const loaded = await loadSpec(p, { loader: { allowRemoteRefs: true, allowExternalFiles: true } });
+    const loaded = await loadSpec(p, {
+      loader: { allowRemoteRefs: true, allowExternalFiles: true },
+    });
     expect(loaded.document).toBeDefined();
   });
 
@@ -147,7 +163,7 @@ describe('loadSpec error handling', () => {
       `openapi: 3.0.3\ninfo: {title: A, version: '1.0'}\npaths: {}\ncomponents:\n  schemas:\n    Odd:\n      x-remote: true\n      description: refs below are scanned but never fetched\n      $ref-comment: 'https://manual.example.com'\n`,
     );
     // findRemoteRefs scans $ref values only; place one without network fetch by allowing remote
-    const doc = fs.readFileSync(p, 'utf8').replace('paths: {}', "paths: {}\n# scan target\n");
+    const doc = fs.readFileSync(p, 'utf8').replace('paths: {}', 'paths: {}\n# scan target\n');
     fs.writeFileSync(p, doc);
     const loaded = await loadSpec(p, { loader: { allowRemoteRefs: true } });
     expect(loaded.document).toBeDefined();
@@ -171,7 +187,9 @@ describe('loadSpec error handling', () => {
       `openapi: 3.0.3\ninfo: {title: A, version: '1.0'}\npaths: {}\ncomponents:\n  schemas:\n    Ref:\n      $ref: '../other/common.yaml#/components/schemas/X'\n`,
     );
     // the gate honors the flag; the ref then resolves normally during bundling
-    const loaded = await loadSpec(p, { loader: { allowExternalFiles: true, allowRemoteRefs: true } });
+    const loaded = await loadSpec(p, {
+      loader: { allowExternalFiles: true, allowRemoteRefs: true },
+    });
     expect(loaded.document).toBeDefined();
   });
   it('rejects external-file refs by default', async () => {
@@ -182,8 +200,8 @@ describe('loadSpec error handling', () => {
     await expect(loadSpec(p)).rejects.toThrow(/point outside the spec's directory/);
   });
   it('rejects unreadable files', async () => {
-    await expect(loadSpec(path.join(os.tmpdir(), 'apiguard-definitely-missing-9x.yaml'))).rejects.toThrow(
-      /cannot read file/,
-    );
+    await expect(
+      loadSpec(path.join(os.tmpdir(), 'apiguard-definitely-missing-9x.yaml')),
+    ).rejects.toThrow(/cannot read file/);
   });
 });

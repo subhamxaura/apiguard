@@ -95,10 +95,7 @@ interface Target {
 
 function targetOf(ref: string, schemas: JsonObject): Target | undefined {
   if (!ref.startsWith('#/components/schemas/')) return undefined;
-  const parts = ref
-    .slice('#/components/schemas/'.length)
-    .split('/')
-    .map(unescape);
+  const parts = ref.slice('#/components/schemas/'.length).split('/').map(unescape);
   let cur: unknown = schemas;
   for (const part of parts) {
     if (!isObj(cur)) return undefined;
@@ -147,10 +144,7 @@ export function dereffedPair(
 /** Resolve a local components.schemas ref to the target object (original, not expanded). */
 function refTarget(ref: string, schemas: unknown): Target | undefined {
   if (!isObj(schemas) || !ref.startsWith('#/components/schemas/')) return undefined;
-  const parts = ref
-    .slice('#/components/schemas/'.length)
-    .split('/')
-    .map(unescape);
+  const parts = ref.slice('#/components/schemas/'.length).split('/').map(unescape);
   let cur: unknown = schemas;
   for (const part of parts) {
     if (!isObj(cur)) return undefined;

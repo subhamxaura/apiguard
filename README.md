@@ -6,7 +6,7 @@
 [![Test](https://github.com/apiguard/apiguard/actions/workflows/test.yml/badge.svg)](./.github/workflows/test.yml)
 [![Lint](https://github.com/apiguard/apiguard/actions/workflows/lint.yml/badge.svg)](./.github/workflows/lint.yml)
 
-**API Guard** diffs two OpenAPI specs — a *baseline* and a *current* — and classifies every
+**API Guard** diffs two OpenAPI specs — a _baseline_ and a _current_ — and classifies every
 difference as **breaking** (an existing conformant client will fail), **non-breaking but
 notable**, or **informational**. It ships as a CLI, a TypeScript library, and a GitHub Action.
 
@@ -53,10 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # merge-base needs history
+        with: { fetch-depth: 0 } # merge-base needs history
       - uses: apiguard/action@v1
         with:
-          current: openapi.yaml     # default; the PR's spec
+          current: openapi.yaml # default; the PR's spec
           # baseline: omitted → the spec at the merge-base with origin/main
 ```
 
@@ -100,13 +100,13 @@ The engine is pure: no stdout, no process.exit, no timestamps in report bodies.
 # apiguard.yaml
 schemaVersion: 1
 rules:
-  property-removed: warning          # downgrade a rule
+  property-removed: warning # downgrade a rule
   description-changed@operation: off # per-context override
 ignore:
-  paths: ["/internal/**"]
-  operations: ["GET /users"]
-  schemas: ["LegacyUser"]
-  changes: ["description-changed"]
+  paths: ['/internal/**']
+  operations: ['GET /users']
+  schemas: ['LegacyUser']
+  changes: ['description-changed']
 ```
 
 [Configuration guide](./docs/configuration.md) · [Ignoring changes](./docs/ignoring.md)

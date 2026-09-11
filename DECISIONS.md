@@ -55,3 +55,24 @@ Every non-obvious decision, its reason, and date. Newest entries last per milest
 - **Status note (3 lines):** semver advisor (§16), markdown reporter (§15.2), flag semantics
   (§13) all covered by tests from M3. Added docs:rules generator + parity test, bench perf
   gate. 293 tests, coverage 94.1/96.7/96.7/85.1 — all gates green.
+
+## M5 — GitHub Action
+
+- **Action bundle is CommonJS with a `.cjs` extension** (2026-09-11): the root package.json has
+  `"type": "module"`, so an esbuild CJS bundle named `dist/index.js` crashed at import
+  (`require is not defined in ES module scope`). Emitting `dist/index.cjs` and pointing
+  `action.yml` at it fixes runtime without a package.json inside dist.
+- **Baseline resolves via merge-base, input takes precedence** (2026-09-11): default
+  `origin/main` merge-base answers "what changed relative to where this branch forked";
+  explicit `baseline` input wins; a spec absent at the merge-base is a readable operator error
+  ("newly added") instead of an empty diff.
+- **Summary write is best-effort** (2026-09-11): `@actions/core` summary throws when
+  `GITHUB_STEP_SUMMARY` is unset (local runs); the adapter downgrades to a warning so the
+  verdict/outputs still emit.
+- **ajv is bundled but inert** (2026-09-11): swagger-parser's `validate()` (the only ajv path)
+  is never called by the loader; the `ajv/dist/runtime` requires in the bundle are never
+  reached. Verified by running the built bundle e2e in a fixture repo.
+- **Status note (3 lines):** action.yml (marketplace-ready, node20), git merge-base baseline
+  resolver, deterministic PR-comment/summary renderer, esbuild bundle (`dist/index.cjs`),
+  4-scenario bundle e2e + 9 unit tests. Self-test workflow dogfoods the Action on fixtures;
+  lint + release workflows added. 302 unit tests green; bundle e2e green.

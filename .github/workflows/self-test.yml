@@ -1,0 +1,46 @@
+name: Self-Test
+
+# Dogfooding: build the Action bundle and run it against this repo's own spec history.
+# The fixture branch always contains breaking changes, so the step is expected to fail —
+# the workflow asserts the FAILURE (proving the Action turns red on breaking changes).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'action.yml'
+      - 'dist/**'
+
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merge-base needs history
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build action bundle
+        run: pnpm build:action
+      - name: Run API Guard against its own fixture history
+        id: guard
+        continue-on-error: true
+        uses: ./
+        with:
+          baseline: tests/fixtures/3.0/endpoint-removed/baseline.yaml
+          current: tests/fixtures/3.0/endpoint-removed/current.yaml
+      - name: Assert the Action failed on breaking changes (expected)
+        run: |
+          echo "verdict=${{ steps.guard.outputs.verdict }}"
+          if [ "${{ steps.guard.outputs.verdict }}" != "fail" ]; then
+            echo "::error::self-test expected verdict=fail (the fixture introduces a breaking change)"
+            exit 1
+          fi
+          echo "Self-test OK: Action correctly failed on breaking changes."

@@ -1,0 +1,56 @@
+# API Guard — detect breaking OpenAPI changes in pull requests.
+# Marketplace metadata (spec §19): brand-color icon, defined inputs/outputs, node20 runtime.
+name: 'API Guard'
+description: >-
+  Detects breaking changes between two OpenAPI specifications (baseline vs. current) and
+  fails the check when the API contract breaks downstream consumers.
+author: 'API Guard contributors'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  current:
+    description: 'Path to the current (PR) OpenAPI spec.'
+    required: false
+    default: 'openapi.yaml'
+  baseline:
+    description: >-
+      Path to the baseline spec. Defaults to the file at the merge-base of HEAD and `base`.
+    required: false
+  base:
+    description: 'Ref to compute the merge-base against when `baseline` is not set.'
+    required: false
+    default: 'origin/main'
+  fail-on:
+    description: "Exit non-zero on 'error' (breaking changes) or 'never'."
+    required: false
+    default: 'error'
+  config:
+    description: 'Path to an apiguard.yaml config file (rules + ignores).'
+    required: false
+  token:
+    description: 'GitHub token (only needed for future PR-comment features).'
+    required: false
+  comment-pr:
+    description: 'Post the report as a PR comment (requires token).'
+    required: false
+    default: 'false'
+  markdown-file:
+    description: 'Also write the markdown report to this file.'
+    required: false
+
+outputs:
+  breaking:
+    description: 'Number of breaking (error) changes.'
+  warnings:
+    description: 'Number of warning-severity changes.'
+  verdict:
+    description: "'fail' when breaking changes were found under the fail-on policy, else 'pass'."
+  suggested-version:
+    description: 'Semver bump suggestion, e.g. "major (5 breaking rules)" or "no bump needed".'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.cjs'

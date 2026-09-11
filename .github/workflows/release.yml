@@ -1,0 +1,38 @@
+name: Release
+
+# semantic-release on main: conventional commits → version + changelog + npm publish.
+# Requires NPM_TOKEN and GITHUB_TOKEN secrets; dist-tag latest on stable, next on beta.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # publish GitHub release + push tags
+  issues: write
+  pull-requests: write
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint && pnpm typecheck && pnpm test
+      - run: pnpm build && pnpm build:action
+      - name: Publish (semantic-release)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npx semantic-release

@@ -76,3 +76,20 @@ Every non-obvious decision, its reason, and date. Newest entries last per milest
   resolver, deterministic PR-comment/summary renderer, esbuild bundle (`dist/index.cjs`),
   4-scenario bundle e2e + 9 unit tests. Self-test workflow dogfoods the Action on fixtures;
   lint + release workflows added. 302 unit tests green; bundle e2e green.
+
+## M6 — Docs, Packaging, Release
+
+- **CLI bin path fixed + shebang** (2026-09-11): `bin` pointed at `./dist/cli.js` but tsup
+  emits `dist/cli/main.js` (npm bin would 404 on install). Added `#!/usr/bin/env node` and
+  removed the dead `./cli` export (its d.ts was a 13-byte stub).
+- **`--help` printed a spurious internal-error line** (2026-09-11): commander's
+  `helpDisplayed` CommanderError reached `renderError`'s ApiguardError/internal fallback and
+  rendered "unexpected internal error" after the help text. Commander errors now render as
+  empty (help/version) or their usage message.
+- **Docs are written, rules.md stays generated** (2026-09-11): README + 5 guides
+  (getting-started, configuration, cli, github-action, ignoring, library) + CONTRIBUTING /
+  CODE_OF_CONDUCT / SECURITY; the rule reference remains registry-generated with a parity
+  test so it cannot drift.
+- **Status note (3 lines):** full docs set, 4 CI workflows (test/lint/release/self-test),
+  semantic-release config, npm pack audit clean (13 files, correct bin), CLI smoke-tested
+  against fixtures (exit 1 breaking / 0 clean). 302 unit + 4 e2e tests green.

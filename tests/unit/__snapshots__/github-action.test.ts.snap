@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderComment > renders a deterministic, sorted report with verdict icon 1`] = `
+"## 🚨 API Guard report
+
+**1** breaking · **0** warnings · **0** info
+
+Suggested next version: **major (removed-method)** (baseline: T @ \`6f38e744f9ca\`, resolved via input)
+
+| Severity | Rule | Location | Message |
+|---|---|---|---|
+| ❌ error | \`response-removed\` | \`/users/{id}\` | Response \`200\` removed |
+
+<details><summary>How to read this report</summary>
+
+- ❌ **error** — breaking: existing conformant clients will fail.
+- ⚠️ **warning** — non-breaking but may require client updates.
+- ℹ️ **info** — additive or cosmetic.
+
+Suppress with an <code>apiguard.yaml</code> ignore list — see the docs.
+</details>"
+`;

@@ -10,7 +10,10 @@ export default {
     ['@semantic-release/changelog', { changelogFile: 'CHANGELOG.md' }],
     [
       '@semantic-release/exec',
-      { prepareCmd: 'pnpm build && pnpm build:action && pnpm docs:rules' },
+      {
+        prepareCmd:
+          'pnpm build && pnpm build:action && pnpm docs:rules && pnpm exec prettier --write CHANGELOG.md docs/rules.md',
+      },
     ],
     [
       '@semantic-release/git',

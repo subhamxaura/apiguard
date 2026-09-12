@@ -4,89 +4,89 @@
 
 API Guard ships **81 rules**. Every rule id is a configuration key in the `rules:` section of `apiguard.yaml`; every severity can be overridden per rule, and per context with the `ruleId@context` syntax (see the [configuration guide](configuration.md)).
 
-| Rule | Default severity | Default kind | Contexts |
-|---|---|---|---|
-| `allOf-member-added` | warning | modification | request-body, response-body, parameter, component, callback, webhook |
-| `allOf-member-removed` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `anyOf-oneOf-member-added` | info | addition | request-body, response-body, parameter, component, callback, webhook |
-| `anyOf-oneOf-member-removed` | error | removal | request-body, response-body, parameter, component, callback, webhook |
-| `api-key-location-changed` | error | modification | security |
-| `callback-added` | info | addition | operation |
-| `callback-removed` | error | removal | operation |
-| `const-added` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `const-changed` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `const-removed` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `constraint-added` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `constraint-relaxed` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `constraint-removed` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `constraint-tightened` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `contact-changed` | info | documentation | api |
-| `content-type-added` | info | addition | request-body, response-body |
-| `content-type-removed` | error | removal | request-body, response-body |
-| `default-response-removed` | error | removal | response-body |
-| `description-changed` | info | documentation | api |
-| `discriminator-added` | warning | modification | request-body, response-body, parameter, component, callback, webhook |
-| `discriminator-changed` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `encoding-changed` | warning | modification | request-body |
-| `enum-value-added` | info | addition | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `enum-value-removed` | error | removal | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `external-docs-changed` | info | documentation | api |
-| `license-changed` | info | documentation | api |
-| `map-closed` | error | modification | request-body, response-body, parameter, component, callback, webhook |
-| `map-opened` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `oauth-scope-added` | info | addition | security |
-| `oauth-scope-removed` | error | removal | security |
-| `openapi-version-changed` | info | documentation | api |
-| `operation-added` | info | addition | operation |
-| `operation-deprecated-added` | warning | modification | operation |
-| `operation-deprecated-removed` | info | documentation | operation |
-| `operation-description-changed` | info | documentation | operation |
-| `operation-id-changed` | warning | modification | operation |
-| `operation-summary-changed` | info | documentation | operation |
-| `operation-tags-changed` | info | documentation | operation |
-| `parameter-added-optional` | info | addition | parameter |
-| `parameter-added-required` | error | addition | parameter |
-| `parameter-default-changed` | warning | modification | parameter |
-| `parameter-format-changed` | warning | modification | parameter |
-| `parameter-location-changed` | error | modification | parameter |
-| `parameter-made-required` | error | modification | parameter |
-| `parameter-metadata-changed` | info | documentation | parameter |
-| `parameter-style-changed` | warning | modification | parameter |
-| `parameter-type-changed` | error | modification | parameter |
-| `property-added` | info | addition | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `property-default-changed` | warning | modification | request-body, response-body, parameter, component, callback, webhook |
-| `property-format-changed` | warning | modification | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `property-removed` | warning | removal | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `property-type-changed` | error | modification | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `removed-method` | error | removal | operation |
-| `removed-parameter` | warning | removal | parameter, request-header |
-| `removed-path` | error | removal | operation |
-| `request-body-added-optional` | info | addition | request-body |
-| `request-body-added-required` | error | addition | request-body |
-| `request-body-removed` | warning | removal | request-body |
-| `request-body-required-changed` | error | modification | request-body |
-| `request-header-removed` | error | removal | request-header |
-| `required-property-added` | error | modification | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
-| `required-removed` | info | relaxation | request-body, response-body, parameter, component, callback, webhook |
-| `response-added` | info | addition | response-body |
-| `response-header-added` | info | addition | response-header |
-| `response-header-removed` | error | removal | response-header |
-| `response-removed` | error | removal | response-body |
-| `schema-description-changed` | info | documentation | request-body, response-body, parameter, component, callback, webhook |
-| `security-requirement-added` | error | modification | security |
-| `security-requirement-changed` | error | modification | security |
-| `security-requirement-removed` | warning | relaxation | security |
-| `security-scheme-added` | info | addition | security |
-| `security-scheme-removed` | error | removal | security |
-| `security-scope-required-added` | error | modification | security |
-| `security-scope-required-removed` | info | relaxation | security |
-| `security-type-changed` | error | modification | security |
-| `server-metadata-changed` | info | documentation | api |
-| `server-url-added` | info | addition | api |
-| `server-url-removed` | error | removal | api |
-| `title-changed` | info | documentation | api |
-| `webhook-added` | info | addition | webhook |
-| `webhook-removed` | error | removal | webhook |
+| Rule                              | Default severity | Default kind  | Contexts                                                                                              |
+| --------------------------------- | ---------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `allOf-member-added`              | warning          | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `allOf-member-removed`            | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `anyOf-oneOf-member-added`        | info             | addition      | request-body, response-body, parameter, component, callback, webhook                                  |
+| `anyOf-oneOf-member-removed`      | error            | removal       | request-body, response-body, parameter, component, callback, webhook                                  |
+| `api-key-location-changed`        | error            | modification  | security                                                                                              |
+| `callback-added`                  | info             | addition      | operation                                                                                             |
+| `callback-removed`                | error            | removal       | operation                                                                                             |
+| `const-added`                     | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `const-changed`                   | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `const-removed`                   | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `constraint-added`                | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `constraint-relaxed`              | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `constraint-removed`              | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `constraint-tightened`            | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `contact-changed`                 | info             | documentation | api                                                                                                   |
+| `content-type-added`              | info             | addition      | request-body, response-body                                                                           |
+| `content-type-removed`            | error            | removal       | request-body, response-body                                                                           |
+| `default-response-removed`        | error            | removal       | response-body                                                                                         |
+| `description-changed`             | info             | documentation | api                                                                                                   |
+| `discriminator-added`             | warning          | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `discriminator-changed`           | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `encoding-changed`                | warning          | modification  | request-body                                                                                          |
+| `enum-value-added`                | info             | addition      | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `enum-value-removed`              | error            | removal       | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `external-docs-changed`           | info             | documentation | api                                                                                                   |
+| `license-changed`                 | info             | documentation | api                                                                                                   |
+| `map-closed`                      | error            | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `map-opened`                      | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `oauth-scope-added`               | info             | addition      | security                                                                                              |
+| `oauth-scope-removed`             | error            | removal       | security                                                                                              |
+| `openapi-version-changed`         | info             | documentation | api                                                                                                   |
+| `operation-added`                 | info             | addition      | operation                                                                                             |
+| `operation-deprecated-added`      | warning          | modification  | operation                                                                                             |
+| `operation-deprecated-removed`    | info             | documentation | operation                                                                                             |
+| `operation-description-changed`   | info             | documentation | operation                                                                                             |
+| `operation-id-changed`            | warning          | modification  | operation                                                                                             |
+| `operation-summary-changed`       | info             | documentation | operation                                                                                             |
+| `operation-tags-changed`          | info             | documentation | operation                                                                                             |
+| `parameter-added-optional`        | info             | addition      | parameter                                                                                             |
+| `parameter-added-required`        | error            | addition      | parameter                                                                                             |
+| `parameter-default-changed`       | warning          | modification  | parameter                                                                                             |
+| `parameter-format-changed`        | warning          | modification  | parameter                                                                                             |
+| `parameter-location-changed`      | error            | modification  | parameter                                                                                             |
+| `parameter-made-required`         | error            | modification  | parameter                                                                                             |
+| `parameter-metadata-changed`      | info             | documentation | parameter                                                                                             |
+| `parameter-style-changed`         | warning          | modification  | parameter                                                                                             |
+| `parameter-type-changed`          | error            | modification  | parameter                                                                                             |
+| `property-added`                  | info             | addition      | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `property-default-changed`        | warning          | modification  | request-body, response-body, parameter, component, callback, webhook                                  |
+| `property-format-changed`         | warning          | modification  | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `property-removed`                | warning          | removal       | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `property-type-changed`           | error            | modification  | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `removed-method`                  | error            | removal       | operation                                                                                             |
+| `removed-parameter`               | warning          | removal       | parameter, request-header                                                                             |
+| `removed-path`                    | error            | removal       | operation                                                                                             |
+| `request-body-added-optional`     | info             | addition      | request-body                                                                                          |
+| `request-body-added-required`     | error            | addition      | request-body                                                                                          |
+| `request-body-removed`            | warning          | removal       | request-body                                                                                          |
+| `request-body-required-changed`   | error            | modification  | request-body                                                                                          |
+| `request-header-removed`          | error            | removal       | request-header                                                                                        |
+| `required-property-added`         | error            | modification  | request-body, response-body, parameter, component, callback, webhook, request-header, response-header |
+| `required-removed`                | info             | relaxation    | request-body, response-body, parameter, component, callback, webhook                                  |
+| `response-added`                  | info             | addition      | response-body                                                                                         |
+| `response-header-added`           | info             | addition      | response-header                                                                                       |
+| `response-header-removed`         | error            | removal       | response-header                                                                                       |
+| `response-removed`                | error            | removal       | response-body                                                                                         |
+| `schema-description-changed`      | info             | documentation | request-body, response-body, parameter, component, callback, webhook                                  |
+| `security-requirement-added`      | error            | modification  | security                                                                                              |
+| `security-requirement-changed`    | error            | modification  | security                                                                                              |
+| `security-requirement-removed`    | warning          | relaxation    | security                                                                                              |
+| `security-scheme-added`           | info             | addition      | security                                                                                              |
+| `security-scheme-removed`         | error            | removal       | security                                                                                              |
+| `security-scope-required-added`   | error            | modification  | security                                                                                              |
+| `security-scope-required-removed` | info             | relaxation    | security                                                                                              |
+| `security-type-changed`           | error            | modification  | security                                                                                              |
+| `server-metadata-changed`         | info             | documentation | api                                                                                                   |
+| `server-url-added`                | info             | addition      | api                                                                                                   |
+| `server-url-removed`              | error            | removal       | api                                                                                                   |
+| `title-changed`                   | info             | documentation | api                                                                                                   |
+| `webhook-added`                   | info             | addition      | webhook                                                                                               |
+| `webhook-removed`                 | error            | removal       | webhook                                                                                               |
 
 ## Details
 
@@ -770,4 +770,3 @@ enum-value-added: Request property `get` enum value `"new"` added
 enum-value-removed: Request property `get` enum value `"old"` removed
 external-docs-changed: External docs changed from `"old"` to `"new"`
 ```
-

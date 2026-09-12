@@ -35,3 +35,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npx semantic-release
+      # Keep a moving major tag (e.g. v1) on the latest release of that major so
+      # consumers can use `uses: subhamxaura/apiguard@v1` instead of pinning v1.0.x.
+      # Per-major: when a v2.0.0 release lands this creates v2 and freezes v1 at the
+      # last v1.x release. Idempotent — re-points to the same commit on non-release pushes.
+      - name: Maintain major version tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LATEST=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          MAJOR="v$(cut -d. -f1 <<<"${LATEST#v}")"
+          SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$LATEST" --jq '.sha')
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" \
+              -f sha="$SHA" -F force=true >/dev/null
+            echo "$MAJOR moved to $LATEST ($SHA)"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$MAJOR" -f sha="$SHA" >/dev/null
+            echo "$MAJOR created at $LATEST ($SHA)"
+          fi

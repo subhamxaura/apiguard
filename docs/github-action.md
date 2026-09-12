@@ -1,8 +1,12 @@
 # GitHub Action
 
-The `apiguard/action` wraps the same engine as the CLI for pull-request workflows:
+The Action wraps the same engine as the CLI for pull-request workflows:
 it resolves a baseline automatically, posts the report as a job summary, and applies your
 fail policy to the step.
+
+It lives in this repository (`action.yml` + the committed `dist/index.cjs` bundle) and is
+consumed directly from release tags, e.g. `subhamxaura/apiguard@v1.0.3` — pin the latest
+release tag from the [releases page](https://github.com/subhamxaura/apiguard/releases).
 
 ## Minimal setup
 
@@ -16,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 } # full history: merge-base needs it
-      - uses: apiguard/action@v1
+      - uses: subhamxaura/apiguard@v1.0.3 # pin the latest release tag
         with:
           current: openapi.yaml
 ```
@@ -64,7 +68,7 @@ The step fails when `verdict` is `fail` (breaking changes under `fail-on: error`
 without blocking — e.g. during a migration — set `fail-on: never` and branch on the output:
 
 ```yaml
-- uses: apiguard/action@v1
+- uses: subhamxaura/apiguard@v1.0.3 # pin the latest release tag
   id: guard
   with: { fail-on: never, current: openapi.yaml }
 - run: echo "breaking=${{ steps.guard.outputs.breaking }}"

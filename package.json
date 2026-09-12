@@ -4,6 +4,25 @@
   "description": "Detect breaking changes between OpenAPI specifications (3.0 & 3.1) so API contracts never silently break downstream consumers.",
   "type": "module",
   "license": "MIT",
+  "author": {
+    "name": "SUBHAM GHOSH"
+  },
+  "homepage": "https://github.com/subhamxaura/apiguard#readme",
+  "bugs": "https://github.com/subhamxaura/apiguard/issues",
+  "keywords": [
+    "openapi",
+    "openapi3",
+    "openapi31",
+    "api",
+    "breaking-change",
+    "api-breaking-change",
+    "openapi-diff",
+    "api-diff",
+    "ci",
+    "cd",
+    "typescript",
+    "developer-tools"
+  ],
   "engines": {
     "node": ">=20"
   },

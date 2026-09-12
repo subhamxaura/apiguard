@@ -26,7 +26,7 @@ notable**, or **informational**. It ships as a CLI, a TypeScript library, and a 
 ## Quick start
 
 ```bash
-pnpm add -D apiguard
+pnpm add -D @subhamxcod/apiguard
 apiguard init                    # scaffold apiguard.yaml
 apiguard diff openapi.v1.yaml openapi.yaml
 ```
@@ -83,7 +83,7 @@ Useful `diff` flags: `--json`, `--markdown`, `--fail-on warning|never`, `--stric
 ## Library
 
 ```ts
-import { analyze } from 'apiguard';
+import { analyze } from '@subhamxcod/apiguard';
 
 const { report, ignored } = await analyze('openapi.v1.yaml', 'openapi.yaml');
 if (report.summary.bySeverity.error > 0) {

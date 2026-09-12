@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/subhamxaura/apiguard/compare/v1.0.0...v1.0.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **docs:** correct GitHub Actions badge URLs ([3741460](https://github.com/subhamxaura/apiguard/commit/3741460a06e65a79adf94f17c093206a1f472d8d))
+
 # 1.0.0 (2026-09-12)
 
 

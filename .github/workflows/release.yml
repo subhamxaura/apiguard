@@ -47,7 +47,7 @@ jobs:
           LATEST=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
           MAJOR="v$(cut -d. -f1 <<<"${LATEST#v}")"
           SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$LATEST" --jq '.sha')
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" >/dev/null 2>&1; then
+          if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" >/dev/null 2>&1; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" \
               -f sha="$SHA" -F force=true >/dev/null
             echo "$MAJOR moved to $LATEST ($SHA)"

@@ -3,7 +3,7 @@
 ## 1. Install
 
 ```bash
-pnpm add -D apiguard        # CLI + library
+pnpm add -D @subhamxcod/apiguard  # CLI + library
 ```
 
 Requires Node.js ≥ 20.

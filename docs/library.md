@@ -1,14 +1,14 @@
 # Library
 
-The `apiguard` package exposes the engine for programmatic use — SDK release gates, spec
+The `@subhamxcod/apiguard` package exposes the engine for programmatic use — SDK release gates, spec
 linters, custom reporters.
 
 ```bash
-pnpm add apiguard
+pnpm add @subhamxcod/apiguard
 ```
 
 ```ts
-import { analyze, suggestVersion, validateSpec } from 'apiguard';
+import { analyze, suggestVersion, validateSpec } from '@subhamxcod/apiguard';
 
 // Full pipeline: load → normalize → diff → classify → sort → semver.
 const { report, ignored } = await analyze('baseline.yaml', 'current.yaml', {

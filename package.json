@@ -1,5 +1,5 @@
 {
-  "name": "apiguard",
+  "name": "@subhamxcod/apiguard",
   "version": "0.0.0",
   "description": "Detect breaking changes between OpenAPI specifications (3.0 & 3.1) so API contracts never silently break downstream consumers.",
   "type": "module",
@@ -8,6 +8,9 @@
     "node": ">=20"
   },
   "packageManager": "pnpm@12.3.4",
+  "publishConfig": {
+    "access": "public"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
@@ -15,7 +18,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/subhamxaura/apiguard.git"
+    "url": "git+https://github.com/subhamxaura/apiguard.git"
   },
   "bin": {
     "apiguard": "./dist/cli/main.js"

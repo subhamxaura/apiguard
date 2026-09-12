@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/subhamxaura/apiguard/compare/v1.0.1...v1.0.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **package:** use scoped npm package name ([d60b645](https://github.com/subhamxaura/apiguard/commit/d60b6453a6cf576327e286ffca8e59690b13bad6))
+
 ## [1.0.1](https://github.com/subhamxaura/apiguard/compare/v1.0.0...v1.0.1) (2026-09-12)
 
 

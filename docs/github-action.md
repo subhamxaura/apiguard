@@ -5,8 +5,9 @@ it resolves a baseline automatically, posts the report as a job summary, and app
 fail policy to the step.
 
 It lives in this repository (`action.yml` + the committed `dist/index.cjs` bundle) and is
-consumed directly from release tags, e.g. `subhamxaura/apiguard@v1.0.3` — pin the latest
-release tag from the [releases page](https://github.com/subhamxaura/apiguard/releases).
+consumed via the moving major tag `subhamxaura/apiguard@v1`, which the release workflow keeps
+on the latest v1.x release. To pin an exact version instead, pick a tag from the
+[releases page](https://github.com/subhamxaura/apiguard/releases).
 
 ## Minimal setup
 
@@ -20,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 } # full history: merge-base needs it
-      - uses: subhamxaura/apiguard@v1.0.3 # pin the latest release tag
+      - uses: subhamxaura/apiguard@v1 # tracks the latest v1.x release
         with:
           current: openapi.yaml
 ```
@@ -68,7 +69,7 @@ The step fails when `verdict` is `fail` (breaking changes under `fail-on: error`
 without blocking — e.g. during a migration — set `fail-on: never` and branch on the output:
 
 ```yaml
-- uses: subhamxaura/apiguard@v1.0.3 # pin the latest release tag
+- uses: subhamxaura/apiguard@v1 # tracks the latest v1.x release
   id: guard
   with: { fail-on: never, current: openapi.yaml }
 - run: echo "breaking=${{ steps.guard.outputs.breaking }}"

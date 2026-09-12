@@ -146,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 } # merge-base needs history
-      - uses: subhamxaura/apiguard@v1.0.3 # pin to the latest release tag
+      - uses: subhamxaura/apiguard@v1 # tracks the latest v1.x release
         with:
           current: openapi.yaml # the PR's spec
           # baseline: omitted → the spec at the merge-base with origin/main

@@ -41,9 +41,15 @@ function git(args: string[], cwd: string): string {
 }
 
 function runAction(env: Record<string, string>) {
-  // Real runners pre-create the step-summary file; @actions/core only appends.
+  // Real runners pre-create the step-summary and output files fresh for every step;
+  // @actions/core only appends, so reset them per run to keep tests isolated.
   const summaryPath = path.join(workspace, 'summary.md');
-  if (!fs.existsSync(summaryPath)) fs.writeFileSync(summaryPath, '');
+  fs.writeFileSync(summaryPath, '');
+  const outputPath = path.join(workspace, 'output.txt');
+  fs.writeFileSync(outputPath, '');
+  // GITHUB_OUTPUT must point at a file: @actions/core appends `key=value\n` records there
+  // (the legacy `::set-output` stdout protocol only fires when GITHUB_OUTPUT is unset,
+  // which never happens on a real Actions runner).
   return spawnSync(process.execPath, [BUNDLE], {
     cwd: workspace,
     env: {
@@ -53,10 +59,38 @@ function runAction(env: Record<string, string>) {
       GITHUB_REF: 'refs/heads/feature',
       RUNNER_TEMP: workspace,
       GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_OUTPUT: outputPath,
       ...env,
     },
     encoding: 'utf8',
   });
+}
+
+/**
+ * Parse a GITHUB_OUTPUT file into a key → value map, exactly like a runner reads it:
+ * @actions/core appends heredoc records (key<<delimiter, value, delimiter), while
+ * workflow scripts append plain `key=value` lines. Both forms are supported.
+ */
+function readOutputs(file: string): Record<string, string> {
+  const outputs: Record<string, string> = {};
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.startsWith('#')) continue; // command-delimiter comments / blanks
+    const heredoc = line.match(/^(.*?)<<(.+)$/); // key<<delimiter
+    if (heredoc) {
+      // The regex guarantees both capture groups when it matches.
+      const key = heredoc[1] as string;
+      const delim = heredoc[2] as string;
+      const end = lines.indexOf(delim, i + 1);
+      outputs[key] = lines.slice(i + 1, end === -1 ? lines.length : end).join('\n');
+      i = end === -1 ? lines.length : end;
+    } else if (line.includes('=')) {
+      const eq = line.indexOf('=');
+      outputs[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+  }
+  return outputs;
 }
 
 describe('action bundle e2e', () => {
@@ -93,10 +127,13 @@ describe('action bundle e2e', () => {
   it('fails on breaking changes and emits outputs (merge-base baseline)', () => {
     const r = runAction({ INPUT_CURRENT: 'openapi.yaml', INPUT_BASE: 'main' });
     expect(r.status).not.toBe(0);
-    const out = r.stdout + r.stderr;
-    expect(out).toContain('::set-output name=breaking::1');
-    expect(out).toContain('::set-output name=verdict::fail');
-    expect(out).toContain('breaking change');
+    // Outputs arrive via the modern GITHUB_OUTPUT file, not the legacy stdout protocol.
+    const outputs = readOutputs(path.join(workspace, 'output.txt'));
+    expect(outputs.breaking).toBe('1');
+    expect(outputs.verdict).toBe('fail');
+    expect(outputs.warnings).toMatch(/^\d+$/);
+    expect(outputs['suggested-version']).toMatch(/^(no bump needed|major|minor|patch)\b/);
+    expect(r.stdout + r.stderr).toContain('breaking change');
     // Job summary is written like a real runner would.
     const summary = fs.readFileSync(path.join(workspace, 'summary.md'), 'utf8');
     expect(summary).toContain('🚨 API Guard report');
@@ -110,7 +147,7 @@ describe('action bundle e2e', () => {
       'INPUT_FAIL-ON': 'never',
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('::set-output name=verdict::pass');
+    expect(readOutputs(path.join(workspace, 'output.txt')).verdict).toBe('pass');
   });
 
   it('writes the markdown report when markdown-file is set', () => {

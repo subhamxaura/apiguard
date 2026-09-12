@@ -19,7 +19,17 @@ export default {
         message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}',
       },
     ],
-    ['@semantic-release/github', {}],
+    [
+      '@semantic-release/github',
+      {
+        // `labels: false` avoids a duplicate-label payload: the plugin defaults to
+        // ['semantic-release'] and then concats its own RELEASE_FAIL_LABEL (also
+        // 'semantic-release'), which GitHub rejects with "Validation Failed ... Label
+        // name invalid" — masking the real release error. The failure issue is still
+        // created, labeled with the plugin's built-in 'semantic-release' label.
+        labels: false,
+      },
+    ],
     ['@semantic-release/npm', { npmPublish: true }],
   ],
 };

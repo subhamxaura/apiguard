@@ -1,3 +1,9 @@
+## [1.0.4](https://github.com/subhamxaura/apiguard/compare/v1.0.3...v1.0.4) (2026-09-12)
+
+### Bug Fixes
+
+- **ci:** correct refs path in v1 tag existence check ([66f94f1](https://github.com/subhamxaura/apiguard/commit/66f94f16049e342b79863b13fd4677a093ff1fe4))
+
 ## [1.0.3](https://github.com/subhamxaura/apiguard/compare/v1.0.2...v1.0.3) (2026-09-12)
 
 ### Bug Fixes

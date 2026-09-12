@@ -1,3 +1,9 @@
+## [1.0.3](https://github.com/subhamxaura/apiguard/compare/v1.0.2...v1.0.3) (2026-09-12)
+
+### Bug Fixes
+
+- **release:** format generated documentation ([15ce3cf](https://github.com/subhamxaura/apiguard/commit/15ce3cf3fd60744e0c5a69e78cdc8ba9a06eaf12))
+
 ## [1.0.2](https://github.com/subhamxaura/apiguard/compare/v1.0.1...v1.0.2) (2026-09-12)
 
 ### Bug Fixes

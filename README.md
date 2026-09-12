@@ -3,8 +3,8 @@
 > Detect breaking changes between OpenAPI specifications (3.0 & 3.1) so API contracts never
 > silently break downstream consumers.
 
-[![Test](https://github.com/apiguard/apiguard/actions/workflows/test.yml/badge.svg)](./.github/workflows/test.yml)
-[![Lint](https://github.com/apiguard/apiguard/actions/workflows/lint.yml/badge.svg)](./.github/workflows/lint.yml)
+[![Test](https://github.com/subhamxaura/apiguard/actions/workflows/test.yml/badge.svg)](./.github/workflows/test.yml)
+[![Lint](https://github.com/subhamxaura/apiguard/actions/workflows/lint.yml/badge.svg)](./.github/workflows/lint.yml)
 
 **API Guard** diffs two OpenAPI specs — a _baseline_ and a _current_ — and classifies every
 difference as **breaking** (an existing conformant client will fail), **non-breaking but

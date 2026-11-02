@@ -31,10 +31,10 @@ inputs:
     description: 'Path to an apiguard.yaml config file (rules + ignores).'
     required: false
   token:
-    description: 'GitHub token (only needed for future PR-comment features).'
+    description: 'GitHub token (used for posting PR sticky comments and check runs).'
     required: false
   comment-pr:
-    description: 'Post the report as a PR comment (requires token).'
+    description: 'Post the report as an idempotent sticky PR comment (requires token).'
     required: false
     default: 'false'
   markdown-file:

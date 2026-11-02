@@ -75,7 +75,13 @@ function toResolved(parsed: ParsedFileConfig): ResolvedConfig {
     },
     failOn: parsed['fail-on'] ?? 'error',
     versioning: { suggest: parsed.versioning?.suggest ?? true },
-    loader: { allowRemoteRefs: parsed.loader?.['allow-remote-refs'] ?? false },
+    profile: parsed.profile ?? 'default',
+    loader: {
+      allowRemoteRefs: parsed.loader?.['allow-remote-refs'] ?? false,
+      allowExternalFiles: parsed.loader?.['allow-external-files'] ?? false,
+      allowPrivateIps: parsed.loader?.['allow-private-ips'] ?? false,
+      headers: parsed.loader?.headers ?? {},
+    },
     github: {
       comment: parsed.github?.comment ?? true,
       checkRun: parsed.github?.['check-run'] ?? true,
@@ -164,12 +170,13 @@ export function discoverAndLoadConfig(
 export function mergeWithFlags(
   base: ResolvedConfig,
   flags: {
-    format?: 'terminal' | 'json' | 'markdown';
+    format?: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
     failOn?: 'error' | 'warning' | 'never';
     includeNonBreaking?: boolean;
     suggestVersion?: boolean;
     noColor?: boolean;
     showIgnored?: boolean;
+    profile?: 'default' | 'strict-sdk' | 'loose-web';
   },
 ): ResolvedConfig {
   return {
@@ -183,6 +190,7 @@ export function mergeWithFlags(
     versioning: {
       suggest: flags.suggestVersion ?? base.versioning.suggest,
     },
+    profile: flags.profile ?? base.profile,
   };
 }
 

@@ -19,6 +19,12 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   failOn: 'error',
   // §13 golden output shows the bump line "only with --suggest-version"; config may opt in.
   versioning: { suggest: false },
-  loader: { allowRemoteRefs: false },
+  profile: 'default',
+  loader: {
+    allowRemoteRefs: false,
+    allowExternalFiles: false,
+    allowPrivateIps: false,
+    headers: {},
+  },
   github: { comment: true, checkRun: true, updateExistingComment: true },
 };

@@ -19,6 +19,8 @@ export interface LoadedSpec {
   title: string;
   /** sha256 hex digest of the normalized document bytes. */
   sha256: string;
+  /** Unparsed raw text for source-mapping line/column numbers. */
+  rawText?: string;
 }
 
 /** Internal representation of a normalized spec used by the diff engine. */

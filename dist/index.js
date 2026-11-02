@@ -1,11 +1,15 @@
 import {
   analyze,
   discoverAndLoadConfig,
+  generateGatewayShim,
   loadConfigFrom,
   loadSpec,
+  renderChangelog,
+  renderHtml,
+  renderSarif,
   suggestVersion,
   validateSemantics
-} from "./chunk-RQVNHPHC.js";
+} from "./chunk-EJQ5XOY6.js";
 
 // src/index.ts
 async function validateSpec(specPath, options) {
@@ -16,7 +20,11 @@ async function validateSpec(specPath, options) {
 export {
   analyze,
   discoverAndLoadConfig,
+  generateGatewayShim,
   loadConfigFrom,
+  renderChangelog,
+  renderHtml,
+  renderSarif,
   suggestVersion,
   validateSpec
 };

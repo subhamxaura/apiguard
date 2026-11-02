@@ -7,6 +7,10 @@ import type { NormalizedSpec } from './core/models/types.js';
 export { analyze, type AnalyzeOptions, type AnalyzeResult };
 export { discoverAndLoadConfig, loadConfigFrom, type LoadedConfig } from './core/config/index.js';
 export { suggestVersion } from './core/versioning/semver-advisor.js';
+export { renderHtml } from './reporters/html.js';
+export { renderSarif } from './reporters/sarif.js';
+export { renderChangelog } from './reporters/changelog.js';
+export { generateGatewayShim, type ShimTarget, type ShimGenerationResult } from './codegen/shim.js';
 export type {
   ApiChange,
   ChangeKind,

@@ -12,6 +12,7 @@ import { TOOL_VERSION } from '../models/report.js';
 import { runStructuralDiff, buildSpecIndex, type DiffContext } from './differ.js';
 import { structuralDeref } from './walker.js';
 import { sortChanges, dedupeChanges } from '../../utils/sort.js';
+import { attachSourceLocations } from '../../utils/source-map.js';
 import { applyIgnores } from '../ignore/ignore.js';
 import { suggestVersion } from '../versioning/semver-advisor.js';
 
@@ -64,8 +65,8 @@ export async function analyze(
   const config: ResolvedConfig = loaded.config;
 
   const [baseline, current] = await Promise.all([
-    loadSpec(baselinePath, { loader: { allowRemoteRefs: config.loader.allowRemoteRefs } }),
-    loadSpec(currentPath, { loader: { allowRemoteRefs: config.loader.allowRemoteRefs } }),
+    loadSpec(baselinePath, { loader: config.loader }),
+    loadSpec(currentPath, { loader: config.loader }),
   ]);
 
   // §11.4: structural deref — local components.schemas $refs are inlined (memoized,
@@ -86,6 +87,7 @@ export async function analyze(
 
   // sort + dedupe per §12 (id computed at emit; first occurrence wins)
   const deduped = dedupeChanges(sortChanges([...ctx.candidates]));
+  attachSourceLocations(deduped, baseline, current);
   const { kept, ignored } = applyIgnores(deduped, config);
 
   const summary = summarize(kept, ignored.length);

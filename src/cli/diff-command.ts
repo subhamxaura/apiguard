@@ -1,9 +1,12 @@
 /** `apiguard diff` per spec §13/§17. */
 import fs from 'node:fs';
+import { exec } from 'node:child_process';
 import { analyze } from '../core/engine/analyze.js';
 import { discoverAndLoadConfig, mergeWithFlags } from '../core/config/index.js';
 import { renderTerminal, suggestLine } from '../reporters/terminal.js';
 import { renderJson } from '../reporters/json.js';
+import { renderHtml } from '../reporters/html.js';
+import { renderSarif } from '../reporters/sarif.js';
 import { CliUsageError, ExitCode } from '../utils/errors.js';
 import type { CliIo } from './run.js';
 
@@ -11,6 +14,8 @@ export interface DiffOptions {
   format?: string;
   json?: boolean;
   markdown?: boolean;
+  html?: boolean;
+  sarif?: boolean;
   config?: string;
   failOn?: string;
   strict?: boolean;
@@ -21,19 +26,38 @@ export interface DiffOptions {
   color?: boolean;
   showIgnored?: boolean;
   verbose?: boolean;
+  gitBase?: string;
+  profile?: 'default' | 'strict-sdk' | 'loose-web';
+  open?: boolean;
 }
 
-function resolveFormat(opts: DiffOptions): 'terminal' | 'json' | 'markdown' {
+function resolveFormat(opts: DiffOptions): 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' {
   if (opts.json) return 'json';
   if (opts.markdown) return 'markdown';
+  if (opts.html) return 'html';
+  if (opts.sarif) return 'sarif';
   if (opts.format !== undefined) {
-    if (opts.format === 'terminal' || opts.format === 'json' || opts.format === 'markdown') {
+    if (
+      opts.format === 'terminal' ||
+      opts.format === 'json' ||
+      opts.format === 'markdown' ||
+      opts.format === 'html' ||
+      opts.format === 'sarif'
+    ) {
       return opts.format;
     }
-    throw new CliUsageError(`invalid --format "${opts.format}" (expected terminal|json|markdown)`);
+    throw new CliUsageError(
+      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif)`,
+    );
   }
   const envFormat = process.env.APIGUARD_FORMAT;
-  if (envFormat === 'json' || envFormat === 'markdown' || envFormat === 'terminal')
+  if (
+    envFormat === 'json' ||
+    envFormat === 'markdown' ||
+    envFormat === 'terminal' ||
+    envFormat === 'html' ||
+    envFormat === 'sarif'
+  )
     return envFormat;
   return 'terminal';
 }
@@ -59,6 +83,20 @@ export async function runDiff(
   opts: DiffOptions,
   io: CliIo,
 ): Promise<number> {
+  // Support --git-base: if only one spec is provided or gitBase is specified
+  if (opts.gitBase) {
+    if (!newSpec && oldSpec) {
+      newSpec = oldSpec;
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    } else if (newSpec && !oldSpec) {
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    }
+  }
+
+  if (!oldSpec || !newSpec) {
+    throw new CliUsageError('missing required spec arguments (or use --git-base <ref>)');
+  }
+
   if (opts.verbose) io.stderr(`verbose: loading baseline ${oldSpec} and current ${newSpec}`);
 
   const loaded = discoverAndLoadConfig({ explicit: opts.config, env: io.env.APIGUARD_CONFIG });
@@ -70,6 +108,7 @@ export async function runDiff(
     includeNonBreaking: opts.strict || opts.includeNonBreaking,
     suggestVersion: opts.suggestVersion,
     noColor: !colorEnabled(opts, loaded.config.output.color),
+    profile: opts.profile,
   });
 
   const { report } = await analyze(oldSpec, newSpec, {
@@ -90,6 +129,10 @@ export async function runDiff(
   } else if (config.output.format === 'markdown') {
     const { renderMarkdown } = await import('../reporters/markdown.js');
     body = renderMarkdown(report);
+  } else if (config.output.format === 'html') {
+    body = renderHtml(report);
+  } else if (config.output.format === 'sarif') {
+    body = renderSarif(report);
   } else {
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,
@@ -107,9 +150,23 @@ export async function runDiff(
   // quiet: verdict only (handled inside renderTerminal); errors still go to stderr
   io.stdout(body);
 
-  if (opts.output) {
-    fs.writeFileSync(opts.output, body + '\n', 'utf8');
-    if (!opts.quiet) io.stderr(`report written to ${opts.output}`);
+  const outputPath = opts.output ?? (opts.open ? 'apiguard-report.html' : undefined);
+  if (outputPath) {
+    fs.writeFileSync(outputPath, body + '\n', 'utf8');
+    if (!opts.quiet) io.stderr(`report written to ${outputPath}`);
+    if (opts.open && (config.output.format === 'html' || outputPath.endsWith('.html'))) {
+      const openCmd =
+        process.platform === 'win32'
+          ? `start "" "${outputPath}"`
+          : process.platform === 'darwin'
+            ? `open "${outputPath}"`
+            : `xdg-open "${outputPath}"`;
+      try {
+        exec(openCmd);
+      } catch {
+        // Best effort browser launch
+      }
+    }
   }
 
   // exit policy per §17: exit 1 when any change at ≥ fail-on level exists

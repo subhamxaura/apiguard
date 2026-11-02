@@ -4,6 +4,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import SwaggerParser from '@apidevtools/swagger-parser';
 import { parse as parseYaml } from 'yaml';
 import { SpecLoadError, errorMessage } from '../utils/errors.js';
@@ -16,11 +18,117 @@ export interface SpecLoaderOptions {
   allowRemoteRefs?: boolean;
   /** Allow file refs outside the spec's directory tree (default false). */
   allowExternalFiles?: boolean;
+  /** Allow private or local IP addresses in remote spec URLs (SSRF protection). */
+  allowPrivateIps?: boolean;
+  /** Custom request headers for fetching remote specs (e.g. Authorization). */
+  headers?: Record<string, string>;
+}
+
+/** Check if hostname points to a private/loopback address for SSRF prevention. */
+export function isPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().trim();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0' || h === '::') {
+    return true;
+  }
+  // IPv4 ranges: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16
+  const ipv4Match = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [b0, b1] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
+    if (b0 === 127) return true;
+    if (b0 === 10) return true;
+    if (b0 === 172 && b1 >= 16 && b1 <= 31) return true;
+    if (b0 === 192 && b1 === 168) return true;
+    if (b0 === 169 && b1 === 254) return true;
+    if (b0 === 0) return true;
+  }
+  // IPv6 unique local fc00::/7 or link-local fe80::/10
+  if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80:')) {
+    return true;
+  }
+  return false;
+}
+
+/** Fetch remote OpenAPI spec via HTTP/HTTPS with SSRF protection. */
+export async function fetchRemoteSpec(
+  urlStr: string,
+  options: SpecLoaderOptions = {},
+): Promise<{ localPath: string; text: string }> {
+  let url: URL;
+  try {
+    url = new URL(urlStr);
+  } catch (e) {
+    throw new SpecLoadError(`${urlStr}: invalid URL: ${errorMessage(e)}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new SpecLoadError(
+      `${urlStr}: unsupported protocol "${url.protocol}" (expected http: or https:)`,
+    );
+  }
+
+  if (!options.allowPrivateIps && isPrivateHost(url.hostname)) {
+    throw new SpecLoadError(
+      `${urlStr}: remote spec blocked: private or loopback host "${url.hostname}" denied by SSRF protection. ` +
+        `Set loader.allow-private-ips: true in apiguard.yaml or CLI to opt in.`,
+    );
+  }
+
+  let text: string;
+  try {
+    const res = await fetch(urlStr, {
+      headers: options.headers ?? {},
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      throw new SpecLoadError(
+        `${urlStr}: failed to fetch spec (HTTP ${res.status} ${res.statusText})`,
+      );
+    }
+    text = await res.text();
+  } catch (e) {
+    if (e instanceof SpecLoadError) throw e;
+    throw new SpecLoadError(`${urlStr}: network error fetching spec: ${errorMessage(e)}`);
+  }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apiguard-remote-'));
+  const ext = url.pathname.toLowerCase().endsWith('.json') ? '.json' : '.yaml';
+  const localPath = path.join(tmpDir, 'spec' + ext);
+  fs.writeFileSync(localPath, text, 'utf8');
+  return { localPath, text };
+}
+
+/** Fetch git spec from revision:path via git show. */
+export function fetchGitSpec(
+  gitUri: string,
+  cwd: string = process.cwd(),
+): { localPath: string; text: string } {
+  const stripped = gitUri.replace(/^git:\/\//i, '').replace(/^git:/i, '');
+  const colonIdx = stripped.indexOf(':');
+  if (colonIdx === -1) {
+    throw new SpecLoadError(`${gitUri}: invalid git spec URI (expected git://<rev>:<path>)`);
+  }
+  const rev = stripped.slice(0, colonIdx);
+  const relPath = stripped.slice(colonIdx + 1);
+
+  let text: string;
+  try {
+    text = execFileSync('git', ['show', `${rev}:${relPath}`], { cwd, encoding: 'utf8' });
+  } catch (e) {
+    throw new SpecLoadError(
+      `${gitUri}: failed to retrieve spec from git (${rev}:${relPath}): ${errorMessage(e)}`,
+    );
+  }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apiguard-git-'));
+  const ext = relPath.toLowerCase().endsWith('.json') ? '.json' : '.yaml';
+  const localPath = path.join(tmpDir, path.basename(relPath) || 'spec' + ext);
+  fs.writeFileSync(localPath, text, 'utf8');
+  return { localPath, text };
 }
 
 /** Options container threaded through loading (config wires into this in M3). */
 export interface LoadOptions {
   loader?: SpecLoaderOptions;
+  cwd?: string;
 }
 
 /** Parse a YAML or JSON string into a plain JS object. */
@@ -115,13 +223,26 @@ export async function loadSpec(
   filePath: string,
   options: LoadOptions = {},
 ): Promise<NormalizedSpec> {
-  const abs = path.resolve(filePath);
+  let abs: string;
   let text: string;
-  try {
-    text = fs.readFileSync(abs, 'utf8');
-  } catch (e) {
-    throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+    const fetched = await fetchRemoteSpec(filePath, options.loader);
+    abs = fetched.localPath;
+    text = fetched.text;
+  } else if (filePath.startsWith('git://') || filePath.startsWith('git:')) {
+    const fetched = fetchGitSpec(filePath, options.cwd);
+    abs = fetched.localPath;
+    text = fetched.text;
+  } else {
+    abs = path.resolve(filePath);
+    try {
+      text = fs.readFileSync(abs, 'utf8');
+    } catch (e) {
+      throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+    }
   }
+
   if (text.trim() === '') {
     throw new SpecLoadError(`${filePath}: file is empty — a spec must contain an OpenAPI document`);
   }
@@ -179,6 +300,7 @@ export async function loadSpec(
     openapiVersion: openapi,
     title,
     sha256: '',
+    rawText: text,
   };
   return toNormalizedSpec(loaded, normalizeDocument(document));
 }

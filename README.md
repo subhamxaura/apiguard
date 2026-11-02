@@ -31,14 +31,18 @@ old spec  +  new spec  →  API Guard  →  breaking changes (or a clean pass)
   schemas, security, callbacks, and webhooks — see the [generated rule reference](./docs/rules.md)
 - **OpenAPI 3.0 and 3.1** — unified normalization: `nullable: true` (3.0) equals
   `type: ["string", "null"]` (3.1)
+- **AST source mapping** — pinpoint exact source file line and column numbers for every change
+- **Multiple output formats** — terminal, JSON (machine contract), markdown, interactive standalone HTML dashboard, and OASIS SARIF 2.1.0 (for GitHub Code Scanning)
+- **Git & remote spec support** — diff directly against git branches (`--git-base main`, `git://rev:file`) or remote URLs (`https://...`) with built-in SSRF protection
+- **Client impact personas** — evaluate breaking impact against `--profile strict-sdk` or `--profile loose-web`
+- **Changelog & shim generators** — automated Keep-a-Changelog release notes and backward-compatibility gateway shims (Express, Cloudflare Worker, Envoy Lua)
 - **Semantic, not textual** — YAML formatting, key order, enum order, and `$ref` aliasing are
   never false positives
 - **Deterministic** — same inputs produce byte-identical output, on any machine, any locale
 - **Configurable** — per-rule severities, per-context overrides (`ruleId@context`), and
   path/operation/schema/rule ignore lists in `apiguard.yaml`
 - **Semver advice** — suggests major/minor/patch from the detected change kinds
-- **Three output formats** — terminal (color), JSON (machine contract), markdown (PR-friendly)
-- **GitHub Action** — merge-base baseline by default, PR job summary, `fail-on` policy
+- **GitHub Action** — merge-base baseline, PR job summary, idempotent sticky PR comments, and inline diff annotations
 - **TypeScript library** — typed, pure API for embedding in your own tooling
 
 ## Quick start
@@ -101,7 +105,11 @@ Diff two OpenAPI specs and report breaking changes. This is the core command.
 
 | Flag                     | Effect                                                   |
 | ------------------------ | -------------------------------------------------------- |
-| `--json`, `--markdown`   | Output format (default: colorized terminal)              |
+| `--json`, `--markdown`   | Output format shorthands                                 |
+| `--html`, `--sarif`      | Interactive standalone HTML dashboard or SARIF 2.1.0     |
+| `--open`                 | Open interactive HTML report in browser automatically    |
+| `--git-base <ref>`       | Diff against baseline from git revision or branch        |
+| `--profile <p>`          | `default`, `strict-sdk`, or `loose-web`                  |
 | `--fail-on <level>`      | `error` (default) \| `warning` \| `never`                |
 | `--strict`               | Shorthand for `--fail-on warning --include-non-breaking` |
 | `--include-non-breaking` | Also render warning + info changes                       |
@@ -118,6 +126,14 @@ Diff two OpenAPI specs and report breaking changes. This is the core command.
 
 Machine contract: `--json` emits a versioned report (`schemaVersion: "1.0"`) with
 `summary.bySeverity`, per-change `ruleId`/`severity`/`kind`, and stable change ids.
+
+### `apiguard changelog <old-spec> <new-spec>`
+
+Generate Keep-a-Changelog formatted release notes grouped by breaking changes, additions, and updates.
+
+### `apiguard codegen-shim <old-spec> <new-spec>`
+
+Synthesize backward-compatibility gateway middleware (`express`, `cloudflare-worker`, `envoy-lua`) for breaking changes.
 
 ### `apiguard validate <spec>`
 

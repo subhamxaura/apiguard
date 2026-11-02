@@ -15,7 +15,7 @@ export const ignoreSchema = z.strictObject({
 });
 
 export const outputSchema = z.strictObject({
-  format: z.enum(['terminal', 'json', 'markdown']).optional().default('terminal'),
+  format: z.enum(['terminal', 'json', 'markdown', 'html', 'sarif']).optional().default('terminal'),
   'include-non-breaking': z.boolean().optional().default(false),
   color: z.enum(['auto', 'always', 'never']).optional().default('auto'),
 });
@@ -26,6 +26,9 @@ export const versioningSchema = z.strictObject({
 
 export const loaderSchema = z.strictObject({
   'allow-remote-refs': z.boolean().optional().default(false),
+  'allow-external-files': z.boolean().optional().default(false),
+  'allow-private-ips': z.boolean().optional().default(false),
+  headers: z.record(z.string(), z.string()).optional().default({}),
 });
 
 export const githubSchema = z.strictObject({
@@ -33,6 +36,8 @@ export const githubSchema = z.strictObject({
   'check-run': z.boolean().optional().default(true),
   'update-existing-comment': z.boolean().optional().default(true),
 });
+
+export const profileSchema = z.enum(['default', 'strict-sdk', 'loose-web']).default('default');
 
 export const configSchema = z.strictObject({
   schemaVersion: z.literal(1, {
@@ -43,6 +48,7 @@ export const configSchema = z.strictObject({
   output: outputSchema.optional(),
   'fail-on': z.enum(['error', 'warning', 'never']).optional(),
   versioning: versioningSchema.optional(),
+  profile: profileSchema.optional(),
   loader: loaderSchema.optional(),
   github: githubSchema.optional(),
 });
@@ -62,12 +68,18 @@ export interface ResolvedConfig {
     showIgnored: boolean;
   };
   output: {
-    format: 'terminal' | 'json' | 'markdown';
+    format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
     includeNonBreaking: boolean;
     color: 'auto' | 'always' | 'never';
   };
   failOn: 'error' | 'warning' | 'never';
   versioning: { suggest: boolean };
-  loader: { allowRemoteRefs: boolean };
+  profile: 'default' | 'strict-sdk' | 'loose-web';
+  loader: {
+    allowRemoteRefs: boolean;
+    allowExternalFiles: boolean;
+    allowPrivateIps: boolean;
+    headers: Record<string, string>;
+  };
   github: { comment: boolean; checkRun: boolean; updateExistingComment: boolean };
 }

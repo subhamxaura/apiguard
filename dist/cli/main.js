@@ -9,10 +9,14 @@ import {
   discoverAndLoadConfig,
   errorMessage,
   formatIssues,
+  generateGatewayShim,
   loadSpec,
   mergeWithFlags,
+  renderChangelog,
+  renderHtml,
+  renderSarif,
   validateSemantics
-} from "../chunk-RQVNHPHC.js";
+} from "../chunk-EJQ5XOY6.js";
 
 // src/cli/run.ts
 import { Command } from "commander";
@@ -45,6 +49,7 @@ function renderError(err, verbose = false) {
 
 // src/cli/diff-command.ts
 import fs from "fs";
+import { exec } from "child_process";
 
 // src/reporters/terminal.ts
 var MARKER = { error: "ERROR", warning: "WARN", info: "INFO" };
@@ -134,14 +139,18 @@ function renderJson(report) {
 function resolveFormat(opts) {
   if (opts.json) return "json";
   if (opts.markdown) return "markdown";
+  if (opts.html) return "html";
+  if (opts.sarif) return "sarif";
   if (opts.format !== void 0) {
-    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown") {
+    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown" || opts.format === "html" || opts.format === "sarif") {
       return opts.format;
     }
-    throw new CliUsageError(`invalid --format "${opts.format}" (expected terminal|json|markdown)`);
+    throw new CliUsageError(
+      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif)`
+    );
   }
   const envFormat = process.env.APIGUARD_FORMAT;
-  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal")
+  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal" || envFormat === "html" || envFormat === "sarif")
     return envFormat;
   return "terminal";
 }
@@ -159,6 +168,17 @@ function colorEnabled(opts, configColor) {
   return process.stdout.isTTY === true;
 }
 async function runDiff(oldSpec, newSpec, opts, io) {
+  if (opts.gitBase) {
+    if (!newSpec && oldSpec) {
+      newSpec = oldSpec;
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    } else if (newSpec && !oldSpec) {
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    }
+  }
+  if (!oldSpec || !newSpec) {
+    throw new CliUsageError("missing required spec arguments (or use --git-base <ref>)");
+  }
   if (opts.verbose) io.stderr(`verbose: loading baseline ${oldSpec} and current ${newSpec}`);
   const loaded = discoverAndLoadConfig({ explicit: opts.config, env: io.env.APIGUARD_CONFIG });
   for (const w of loaded.warnings) io.stderr(`warning: ${w}`);
@@ -167,7 +187,8 @@ async function runDiff(oldSpec, newSpec, opts, io) {
     failOn: resolveFailOn(opts),
     includeNonBreaking: opts.strict || opts.includeNonBreaking,
     suggestVersion: opts.suggestVersion,
-    noColor: !colorEnabled(opts, loaded.config.output.color)
+    noColor: !colorEnabled(opts, loaded.config.output.color),
+    profile: opts.profile
   });
   const { report } = await analyze(oldSpec, newSpec, {
     config,
@@ -182,6 +203,10 @@ async function runDiff(oldSpec, newSpec, opts, io) {
   } else if (config.output.format === "markdown") {
     const { renderMarkdown } = await import("../markdown-J2EC3VFS.js");
     body = renderMarkdown(report);
+  } else if (config.output.format === "html") {
+    body = renderHtml(report);
+  } else if (config.output.format === "sarif") {
+    body = renderSarif(report);
   } else {
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,
@@ -194,9 +219,17 @@ async function runDiff(oldSpec, newSpec, opts, io) {
     if (bump) body += "\n\n" + bump;
   }
   io.stdout(body);
-  if (opts.output) {
-    fs.writeFileSync(opts.output, body + "\n", "utf8");
-    if (!opts.quiet) io.stderr(`report written to ${opts.output}`);
+  const outputPath = opts.output ?? (opts.open ? "apiguard-report.html" : void 0);
+  if (outputPath) {
+    fs.writeFileSync(outputPath, body + "\n", "utf8");
+    if (!opts.quiet) io.stderr(`report written to ${outputPath}`);
+    if (opts.open && (config.output.format === "html" || outputPath.endsWith(".html"))) {
+      const openCmd = process.platform === "win32" ? `start "" "${outputPath}"` : process.platform === "darwin" ? `open "${outputPath}"` : `xdg-open "${outputPath}"`;
+      try {
+        exec(openCmd);
+      } catch {
+      }
+    }
   }
   if (config.failOn === "never") return ExitCode.Ok;
   const threshold = config.failOn === "error" ? "error" : "warning";
@@ -354,6 +387,65 @@ use --force to overwrite`
   io.stdout('next: run "apiguard diff examples/baseline.yaml examples/current.yaml"');
 }
 
+// src/cli/changelog-command.ts
+import fs3 from "fs";
+async function runChangelog(oldSpec, newSpec, opts, io) {
+  if (opts.gitBase) {
+    if (!newSpec && oldSpec) {
+      newSpec = oldSpec;
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    }
+  }
+  if (!oldSpec || !newSpec) {
+    throw new CliUsageError("missing required spec arguments (or use --git-base <ref>)");
+  }
+  const loaded = discoverAndLoadConfig({ explicit: opts.config, env: io.env.APIGUARD_CONFIG });
+  const { report } = await analyze(oldSpec, newSpec, { config: loaded.config });
+  const body = opts.json ? JSON.stringify(
+    { semver: report.semver, summary: report.summary, changes: report.changes },
+    null,
+    2
+  ) : renderChangelog(report);
+  io.stdout(body);
+  if (opts.output) {
+    fs3.writeFileSync(opts.output, body + "\n", "utf8");
+    io.stderr(`changelog written to ${opts.output}`);
+  }
+  return ExitCode.Ok;
+}
+
+// src/cli/codegen-command.ts
+import fs4 from "fs";
+async function runCodegenShim(oldSpec, newSpec, opts, io) {
+  if (opts.gitBase) {
+    if (!newSpec && oldSpec) {
+      newSpec = oldSpec;
+      oldSpec = `git:${opts.gitBase}:${newSpec}`;
+    }
+  }
+  if (!oldSpec || !newSpec) {
+    throw new CliUsageError("missing required spec arguments (or use --git-base <ref>)");
+  }
+  const rawTarget = opts.target ?? "express";
+  if (rawTarget !== "express" && rawTarget !== "cloudflare-worker" && rawTarget !== "envoy-lua") {
+    throw new CliUsageError(
+      `invalid --target "${rawTarget}" (expected express|cloudflare-worker|envoy-lua)`
+    );
+  }
+  const target = rawTarget;
+  const loaded = discoverAndLoadConfig({ explicit: opts.config, env: io.env.APIGUARD_CONFIG });
+  const { report } = await analyze(oldSpec, newSpec, { config: loaded.config });
+  const result = generateGatewayShim(report, target);
+  io.stdout(result.code);
+  if (opts.output) {
+    fs4.writeFileSync(opts.output, result.code, "utf8");
+    io.stderr(
+      `compatibility shim written to ${opts.output} (${result.handledChanges} breaking change(s) addressed)`
+    );
+  }
+  return ExitCode.Ok;
+}
+
 // src/cli/run.ts
 var defaultIo = {
   stdout: (s) => process.stdout.write(s + "\n"),
@@ -369,7 +461,10 @@ function buildProgram(io) {
     writeErr: (s) => io.stderr(s.trimEnd())
   });
   program.name("apiguard").version(TOOL_VERSION).description("Detect breaking changes between OpenAPI specifications");
-  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--format <f>", "terminal|json|markdown (aliases: --json, --markdown)").option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
+  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option(
+    "--format <f>",
+    "terminal|json|markdown|html|sarif (aliases: --json, --markdown, --html, --sarif)"
+  ).option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--html", "shorthand for --format html").option("--sarif", "shorthand for --format sarif").option("--open", "open interactive HTML report in browser").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--profile <p>", "client persona profile (default|strict-sdk|loose-web)").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
     const code = await runDiff(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
@@ -377,6 +472,20 @@ function buildProgram(io) {
     }
   });
   void diff;
+  program.command("changelog").description("Generate a Keep-a-Changelog formatted release summary from spec diff").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--config <path>", "explicit config file").option("--output <path>", "write changelog to file").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--json", "output changelog as JSON").action(async (oldSpec, newSpec, opts) => {
+    const code = await runChangelog(oldSpec, newSpec, opts, io);
+    if (code !== ExitCode.Ok) {
+      process.exitCode = code;
+      program.__apiguardExitCode = code;
+    }
+  });
+  program.command("codegen-shim").description("Generate backward-compatibility gateway adapter for breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--target <t>", "express|cloudflare-worker|envoy-lua", "express").option("--config <path>", "explicit config file").option("--output <path>", "write generated shim code to file").option("--git-base <ref>", "resolve baseline against git branch or commit").action(async (oldSpec, newSpec, opts) => {
+    const code = await runCodegenShim(oldSpec, newSpec, opts, io);
+    if (code !== ExitCode.Ok) {
+      process.exitCode = code;
+      program.__apiguardExitCode = code;
+    }
+  });
   program.command("validate").description("Load and validate a spec").argument("<spec>", "spec path").option("--config <path>", "explicit config file").option("--strict", "exit 1 when semantic warnings exist").option("--verbose", "log parse steps to stderr").action(async (spec, opts) => {
     const outcome = await runValidate(spec, opts, io);
     if (outcome.exitCode !== ExitCode.Ok) {

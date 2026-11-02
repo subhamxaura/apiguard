@@ -41,7 +41,7 @@ export function emit(
   const resolved = classify(
     opts.ruleId,
     opts.location.context,
-    { rules: ctx.config.rules },
+    { rules: ctx.config.rules, profile: ctx.config.profile },
     opts.doctrine,
   );
   const rule = getRule(opts.ruleId);

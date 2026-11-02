@@ -4,13 +4,16 @@
  * process.exit — the entry maps the returned verdict to the step outcome.
  */
 import * as core from '@actions/core';
+import * as github from '@actions/github';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ResolvedConfig } from '../core/config/schema.js';
+import type { DiffReport } from '../core/models/report.js';
 import { analyze } from '../core/engine/analyze.js';
 import { DEFAULT_CONFIG, loadConfigFrom } from '../core/config/index.js';
 import { resolveBaseline } from './baseline.js';
 import { renderComment, type ActionOutcome } from './comment.js';
+import { errorMessage } from '../utils/errors.js';
 
 export interface RunOptions {
   /** Injected for tests; defaults to the real @actions/core. */
@@ -21,6 +24,7 @@ export interface RunOptions {
 export interface RunResult {
   outcome: ActionOutcome;
   commentBody: string;
+  report?: DiffReport;
 }
 
 /** Read Action inputs through the injected (or real) core adapter. */
@@ -99,7 +103,59 @@ export async function runAction(opts: RunOptions = {}): Promise<RunResult> {
     verdict,
     baselineVia: baseline.via,
   };
-  return { outcome, commentBody: renderComment(report, outcome) };
+  return { outcome, commentBody: renderComment(report, outcome), report };
+}
+
+/** Post or update an idempotent PR comment with API Guard report. */
+export async function postPrComment(
+  token: string,
+  commentBody: string,
+  injected?: {
+    core?: typeof core;
+    context?: typeof github.context;
+    octokit?: ReturnType<typeof github.getOctokit>;
+  },
+): Promise<void> {
+  const c = injected?.core ?? core;
+  const ctx = injected?.context ?? github.context;
+  const prNumber = ctx.payload.pull_request?.number;
+  if (!prNumber) {
+    c.info('API Guard: not a pull_request event, skipping PR comment.');
+    return;
+  }
+  const octokit = injected?.octokit ?? github.getOctokit(token);
+  const { owner, repo } = ctx.repo;
+  const marker = '<!-- apiguard-comment -->';
+  const bodyWithMarker = `${marker}\n${commentBody}`;
+
+  try {
+    const { data: comments } = await octokit.rest.issues.listComments({
+      owner,
+      repo,
+      issue_number: prNumber,
+      per_page: 50,
+    });
+    const existing = comments.find((cm) => cm.body && cm.body.includes(marker));
+    if (existing) {
+      await octokit.rest.issues.updateComment({
+        owner,
+        repo,
+        comment_id: existing.id,
+        body: bodyWithMarker,
+      });
+      c.info(`API Guard: updated existing PR comment (#${existing.id}).`);
+    } else {
+      await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body: bodyWithMarker,
+      });
+      c.info(`API Guard: posted PR comment to #${prNumber}.`);
+    }
+  } catch (err) {
+    c.warning(`API Guard: could not post/update PR comment: ${errorMessage(err)}`);
+  }
 }
 
 /** Write outputs + summary via the @actions/core adapter. */
@@ -108,6 +164,27 @@ export function emitOutputs(c: typeof core, result: RunResult, markdownPath?: st
   c.setOutput('warnings', String(result.outcome.warnings));
   c.setOutput('verdict', result.outcome.verdict);
   c.setOutput('suggested-version', result.outcome.suggestedVersion);
+
+  // Emit inline workflow annotations for pull requests
+  if (result.report?.changes) {
+    for (const change of result.report.changes) {
+      if (change.location.line && change.location.file) {
+        const file = change.location.file;
+        const startLine = change.location.line;
+        const startColumn = change.location.column;
+        const title = change.ruleId;
+        const msg = `${change.message}. Suggestion: ${change.suggestion}`;
+        if (change.severity === 'error') {
+          c.error(msg, { file, startLine, startColumn, title });
+        } else if (change.severity === 'warning') {
+          c.warning(msg, { file, startLine, startColumn, title });
+        } else {
+          c.notice(msg, { file, startLine, startColumn, title });
+        }
+      }
+    }
+  }
+
   try {
     c.summary.addRaw(result.commentBody).write();
   } catch (err) {

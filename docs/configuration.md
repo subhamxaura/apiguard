@@ -27,9 +27,11 @@ ignore:
   showIgnored: false # implies --show-ignored when true
 
 output:
-  format: terminal # terminal | json | markdown
+  format: terminal # terminal | json | markdown | html | sarif
   includeNonBreaking: false
   color: auto # auto | always | never
+
+profile: default # default | strict-sdk | loose-web
 
 failOn: error # error | warning | never
 
@@ -38,11 +40,14 @@ versioning:
 
 loader:
   allowRemoteRefs: false # deny http(s) $ref fetching (default)
+  allowExternalFiles: false # allow multi-file refs outside spec dir
+  allowPrivateIps: false # allow private/loopback IP targets (SSRF protection)
+  headers: {} # custom headers for remote spec loading
 
 github:
-  comment: false # reserved for Action-side comment config
-  checkRun: false
-  updateExistingComment: false
+  comment: true # post PR comment with report
+  checkRun: true # create GitHub check run with annotations
+  updateExistingComment: true # update previous sticky comment instead of spamming
 ```
 
 ## Rule severities and context overrides

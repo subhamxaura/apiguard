@@ -31,6 +31,8 @@ export function sideClassOf(context: Context): SideClass {
 export interface ClassifyOptions {
   /** config rules map: ruleId or ruleId@context → severity (may include 'off'). */
   rules: Record<string, 'error' | 'warning' | 'info' | 'off'>;
+  /** Client impact persona profile. */
+  profile?: 'default' | 'strict-sdk' | 'loose-web';
 }
 
 /** Parse a config rules key into ruleId + optional context scope. */
@@ -97,10 +99,25 @@ export function classify(
     'request-body-removed',
     'removed-parameter',
   ]);
-  const severity: Severity =
-    override ??
-    (DOCTRINE_RULES.has(ruleId)
-      ? resolveContextSeverity(ruleId, context, doctrine ?? {})
-      : rule.defaultSeverity);
+  let baseSeverity: Severity = DOCTRINE_RULES.has(ruleId)
+    ? resolveContextSeverity(ruleId, context, doctrine ?? {})
+    : rule.defaultSeverity;
+
+  // Profile-based adjustments when no explicit config override was provided
+  if (override === undefined && options.profile) {
+    if (options.profile === 'strict-sdk') {
+      if (ruleId === 'enum-value-added') {
+        baseSeverity = 'error'; // Strict typed SDKs fail exhaustive enum handling
+      } else if (ruleId === 'anyOf-oneOf-member-added') {
+        baseSeverity = 'warning'; // New union variant breaks exhaustive pattern matches
+      }
+    } else if (options.profile === 'loose-web') {
+      if (ruleId === 'enum-value-added') {
+        baseSeverity = 'info';
+      }
+    }
+  }
+
+  const severity: Severity = override ?? baseSeverity;
   return { severity, kind: rule.defaultKind };
 }

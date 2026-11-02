@@ -41,6 +41,12 @@ export interface ChangeLocation {
   componentName?: string;
   /** Component rules: number of operation usages found. */
   usageCount?: number;
+  /** Source file path where change is located (when source mapping is available). */
+  file?: string;
+  /** 1-based source line number. */
+  line?: number;
+  /** 1-based source column number. */
+  column?: number;
 }
 
 export interface ApiChange {

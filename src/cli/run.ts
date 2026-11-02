@@ -6,6 +6,8 @@ import { exitCodeFor, renderError } from './exit-codes.js';
 import { runDiff } from './diff-command.js';
 import { runValidate } from './validate-command.js';
 import { runInit } from './init-command.js';
+import { runChangelog } from './changelog-command.js';
+import { runCodegenShim } from './codegen-command.js';
 import { TOOL_VERSION } from '../core/models/report.js';
 
 export interface CliIo {
@@ -43,9 +45,17 @@ export function buildProgram(io: CliIo): Command {
     .description('Diff two OpenAPI specs and report breaking changes')
     .argument('<old-spec>', 'baseline spec path')
     .argument('<new-spec>', 'current spec path')
-    .option('--format <f>', 'terminal|json|markdown (aliases: --json, --markdown)')
+    .option(
+      '--format <f>',
+      'terminal|json|markdown|html|sarif (aliases: --json, --markdown, --html, --sarif)',
+    )
     .option('--json', 'shorthand for --format json')
     .option('--markdown', 'shorthand for --format markdown')
+    .option('--html', 'shorthand for --format html')
+    .option('--sarif', 'shorthand for --format sarif')
+    .option('--open', 'open interactive HTML report in browser')
+    .option('--git-base <ref>', 'resolve baseline against git branch or commit')
+    .option('--profile <p>', 'client persona profile (default|strict-sdk|loose-web)')
     .option('--config <path>', 'explicit config file (missing file: exit 2)')
     .option('--fail-on <level>', 'error|warning|never', 'error')
     .option('--strict', 'shorthand for --fail-on warning AND --include-non-breaking')
@@ -66,6 +76,40 @@ export function buildProgram(io: CliIo): Command {
     });
 
   void diff;
+
+  program
+    .command('changelog')
+    .description('Generate a Keep-a-Changelog formatted release summary from spec diff')
+    .argument('<old-spec>', 'baseline spec path')
+    .argument('<new-spec>', 'current spec path')
+    .option('--config <path>', 'explicit config file')
+    .option('--output <path>', 'write changelog to file')
+    .option('--git-base <ref>', 'resolve baseline against git branch or commit')
+    .option('--json', 'output changelog as JSON')
+    .action(async (oldSpec, newSpec, opts) => {
+      const code = await runChangelog(oldSpec, newSpec, opts, io);
+      if (code !== ExitCode.Ok) {
+        process.exitCode = code;
+        (program as unknown as { __apiguardExitCode?: number }).__apiguardExitCode = code;
+      }
+    });
+
+  program
+    .command('codegen-shim')
+    .description('Generate backward-compatibility gateway adapter for breaking changes')
+    .argument('<old-spec>', 'baseline spec path')
+    .argument('<new-spec>', 'current spec path')
+    .option('--target <t>', 'express|cloudflare-worker|envoy-lua', 'express')
+    .option('--config <path>', 'explicit config file')
+    .option('--output <path>', 'write generated shim code to file')
+    .option('--git-base <ref>', 'resolve baseline against git branch or commit')
+    .action(async (oldSpec, newSpec, opts) => {
+      const code = await runCodegenShim(oldSpec, newSpec, opts, io);
+      if (code !== ExitCode.Ok) {
+        process.exitCode = code;
+        (program as unknown as { __apiguardExitCode?: number }).__apiguardExitCode = code;
+      }
+    });
 
   program
     .command('validate')

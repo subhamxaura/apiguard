@@ -57,6 +57,21 @@ a readable message — pass an explicit `baseline` for that case.
 | `verdict`           | `fail` or `pass` under the fail-on policy           |
 | `suggested-version` | e.g. `major (3 breaking rules)` or `no bump needed` |
 
+## Pull request comments & inline annotations
+
+When `comment-pr: true` and `token: ${{ secrets.GITHUB_TOKEN }}` are set:
+
+- **Sticky PR comment**: API Guard posts an idempotent sticky comment to the pull request. On subsequent commits pushed to the PR, it updates the existing comment in-place instead of creating duplicate comments.
+- **Inline PR annotations**: Breaking changes and warnings are automatically annotated on the exact lines and columns in the pull request's "Files changed" diff tab.
+
+```yaml
+- uses: subhamxaura/apiguard@v1
+  with:
+    current: openapi.yaml
+    comment-pr: true
+    token: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ## Job summary
 
 Every run writes a markdown summary (visible on the workflow run page): counts, suggested

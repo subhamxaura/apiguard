@@ -924,6 +924,11 @@ export function allRuleIds(): string[] {
   return RULES.map((r) => r.id);
 }
 
+/** All rule definitions. */
+export function getAllRules(): RuleDefinition[] {
+  return [...RULES];
+}
+
 function constraintText(c: TemplateContext): string {
   const name = nameOf(c);
   const oldV = c.oldValue === undefined ? undefined : JSON.stringify(c.oldValue);

@@ -12,7 +12,7 @@ interface ResolvedConfig {
         showIgnored: boolean;
     };
     output: {
-        format: 'terminal' | 'json' | 'markdown';
+        format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
         includeNonBreaking: boolean;
         color: 'auto' | 'always' | 'never';
     };
@@ -20,8 +20,12 @@ interface ResolvedConfig {
     versioning: {
         suggest: boolean;
     };
+    profile: 'default' | 'strict-sdk' | 'loose-web';
     loader: {
         allowRemoteRefs: boolean;
+        allowExternalFiles: boolean;
+        allowPrivateIps: boolean;
+        headers: Record<string, string>;
     };
     github: {
         comment: boolean;
@@ -55,6 +59,12 @@ interface ChangeLocation {
     componentName?: string;
     /** Component rules: number of operation usages found. */
     usageCount?: number;
+    /** Source file path where change is located (when source mapping is available). */
+    file?: string;
+    /** 1-based source line number. */
+    line?: number;
+    /** 1-based source column number. */
+    column?: number;
 }
 interface ApiChange {
     /** stable id = sha256(...).slice(0,16) per spec §12. */
@@ -152,6 +162,8 @@ interface LoadedSpec {
     title: string;
     /** sha256 hex digest of the normalized document bytes. */
     sha256: string;
+    /** Unparsed raw text for source-mapping line/column numbers. */
+    rawText?: string;
 }
 /** Internal representation of a normalized spec used by the diff engine. */
 interface NormalizedSpec extends LoadedSpec {
@@ -186,6 +198,46 @@ declare function discoverAndLoadConfig(opts?: {
  */
 declare function suggestVersion(changes: ApiChange[]): SemverAdvice;
 
+/**
+ * HTML reporter for API Guard.
+ * Generates an interactive, zero-dependency, single-file HTML report.
+ * Conforms strictly to the Hallmark Anti-AI-Slop design floor.
+ */
+
+/** Render a standalone, interactive HTML dashboard. */
+declare function renderHtml(report: DiffReport): string;
+
+/**
+ * SARIF 2.1.0 reporter for GitHub Advanced Security / Code Scanning integration.
+ * Conforms to OASIS SARIF v2.1.0 specification.
+ */
+
+/** Render a DiffReport into a SARIF 2.1.0 JSON document. */
+declare function renderSarif(report: DiffReport): string;
+
+/**
+ * Automated API Changelog generator.
+ * Produces structured release notes in Keep-a-Changelog Markdown format.
+ */
+
+/** Render a DiffReport into Keep-a-Changelog Markdown format. */
+declare function renderChangelog(report: DiffReport): string;
+
+/**
+ * Backward-Compatibility Gateway Shim Generator.
+ * Synthesizes edge workers and API gateway middleware to maintain
+ * backward compatibility for legacy clients during breaking changes.
+ */
+
+type ShimTarget = 'express' | 'cloudflare-worker' | 'envoy-lua';
+interface ShimGenerationResult {
+    target: ShimTarget;
+    code: string;
+    handledChanges: number;
+}
+/** Generate backward compatibility gateway adapter for breaking API changes. */
+declare function generateGatewayShim(report: DiffReport, target?: ShimTarget): ShimGenerationResult;
+
 /** Public library API per spec §18. Pure; no stdout; no process.exit. */
 
 /**
@@ -201,4 +253,4 @@ declare function validateSpec(specPath: string, options?: {
     validation: ValidationResult;
 }>;
 
-export { type AnalyzeOptions, type AnalyzeResult, type ApiChange, type ChangeKind, type ChangeLocation, type Context, type DiffReport, type DiffSummary, type LoadedConfig, type LoadedSpec, type NormalizedSpec, type ResolvedConfig, type SemverAdvice, type Severity, type SpecMeta, type ValidationIssue, type ValidationResult, analyze, discoverAndLoadConfig, loadConfigFrom, suggestVersion, validateSpec };
+export { type AnalyzeOptions, type AnalyzeResult, type ApiChange, type ChangeKind, type ChangeLocation, type Context, type DiffReport, type DiffSummary, type LoadedConfig, type LoadedSpec, type NormalizedSpec, type ResolvedConfig, type SemverAdvice, type Severity, type ShimGenerationResult, type ShimTarget, type SpecMeta, type ValidationIssue, type ValidationResult, analyze, discoverAndLoadConfig, generateGatewayShim, loadConfigFrom, renderChangelog, renderHtml, renderSarif, suggestVersion, validateSpec };

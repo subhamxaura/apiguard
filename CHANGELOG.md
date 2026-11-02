@@ -1,3 +1,9 @@
+# [1.1.0](https://github.com/subhamxaura/apiguard/compare/v1.0.4...v1.1.0) (2026-11-02)
+
+### Features
+
+- add enterprise reporting, AST source mapping, remote ingestion, and gateway shims ([070e07d](https://github.com/subhamxaura/apiguard/commit/070e07d6ec2bb0787caa7689caa6e1120fc44d55))
+
 ## [1.0.4](https://github.com/subhamxaura/apiguard/compare/v1.0.3...v1.0.4) (2026-09-12)
 
 ### Bug Fixes

@@ -108,10 +108,11 @@ export function fetchGitSpec(
   }
   const rev = stripped.slice(0, colonIdx);
   const relPath = stripped.slice(colonIdx + 1);
+  const gitRelPath = relPath.replace(/\\/g, '/');
 
   let text: string;
   try {
-    text = execFileSync('git', ['show', `${rev}:${relPath}`], { cwd, encoding: 'utf8' });
+    text = execFileSync('git', ['show', `${rev}:${gitRelPath}`], { cwd, encoding: 'utf8' });
   } catch (e) {
     throw new SpecLoadError(
       `${gitUri}: failed to retrieve spec from git (${rev}:${relPath}): ${errorMessage(e)}`,
@@ -225,82 +226,97 @@ export async function loadSpec(
 ): Promise<NormalizedSpec> {
   let abs: string;
   let text: string;
+  let tmpDirToClean: string | undefined;
 
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-    const fetched = await fetchRemoteSpec(filePath, options.loader);
-    abs = fetched.localPath;
-    text = fetched.text;
-  } else if (filePath.startsWith('git://') || filePath.startsWith('git:')) {
-    const fetched = fetchGitSpec(filePath, options.cwd);
-    abs = fetched.localPath;
-    text = fetched.text;
-  } else {
-    abs = path.resolve(filePath);
+  try {
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+      const fetched = await fetchRemoteSpec(filePath, options.loader);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = path.dirname(fetched.localPath);
+    } else if (filePath.startsWith('git://') || filePath.startsWith('git:')) {
+      const fetched = fetchGitSpec(filePath, options.cwd);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = path.dirname(fetched.localPath);
+    } else {
+      abs = path.resolve(filePath);
+      try {
+        text = fs.readFileSync(abs, 'utf8');
+      } catch (e) {
+        throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+      }
+    }
+
+    if (text.trim() === '') {
+      throw new SpecLoadError(
+        `${filePath}: file is empty — a spec must contain an OpenAPI document`,
+      );
+    }
+
+    const parsed = parseSpecText(text, filePath);
+
+    const openapi = typeof parsed.openapi === 'string' ? parsed.openapi : '';
+    if (!openapi) {
+      throw new SpecLoadError(
+        `${filePath}: missing 'openapi' version field — this does not look like an OpenAPI 3.x document`,
+      );
+    }
+    if (!openapi.startsWith('3.')) {
+      throw new SpecLoadError(
+        `${filePath}: unsupported OpenAPI version "${openapi}" — API Guard supports 3.0.x and 3.1.x only`,
+      );
+    }
+
+    const specDir = path.dirname(abs);
+    const allowRemote = options.loader?.allowRemoteRefs ?? false;
+    const allowExternal = options.loader?.allowExternalFiles ?? false;
+
+    const remoteRefs = findRemoteRefs(parsed);
+    if (remoteRefs.length > 0 && !allowRemote) {
+      throw new SpecLoadError(
+        `${filePath}: remote $ref(s) denied by default (found ${remoteRefs.length}: ` +
+          `${remoteRefs.slice(0, 3).join(', ')}${remoteRefs.length > 3 ? ', …' : ''}). ` +
+          `Set loader.allow-remote-refs: true in apiguard.yaml to opt in.`,
+      );
+    }
+
+    const externalRefs = findExternalFileRefs(parsed, specDir);
+    if (externalRefs.length > 0 && !allowExternal) {
+      throw new SpecLoadError(
+        `${filePath}: $ref(s) point outside the spec's directory (found ${externalRefs.length}: ` +
+          `${externalRefs.slice(0, 3).join(', ')}${externalRefs.length > 3 ? ', …' : ''}). ` +
+          `External-file refs are not supported in v1.`,
+      );
+    }
+
+    let document: unknown;
     try {
-      text = fs.readFileSync(abs, 'utf8');
+      // bundle resolves local file refs and $ref cycles into a self-contained document
+      document = await SwaggerParser.bundle(abs);
     } catch (e) {
-      throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+      throw new SpecLoadError(`${filePath}: parser error: ${errorMessage(e)}`);
+    }
+
+    const info = (parsed.info ?? {}) as Record<string, unknown>;
+    const title = typeof info.title === 'string' ? info.title : '';
+
+    const loaded: LoadedSpec = {
+      document: document as JsonValue,
+      source: filePath,
+      openapiVersion: openapi,
+      title,
+      sha256: '',
+      rawText: text,
+    };
+    return toNormalizedSpec(loaded, normalizeDocument(document));
+  } finally {
+    if (tmpDirToClean) {
+      try {
+        fs.rmSync(tmpDirToClean, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
     }
   }
-
-  if (text.trim() === '') {
-    throw new SpecLoadError(`${filePath}: file is empty — a spec must contain an OpenAPI document`);
-  }
-
-  const parsed = parseSpecText(text, filePath);
-
-  const openapi = typeof parsed.openapi === 'string' ? parsed.openapi : '';
-  if (!openapi) {
-    throw new SpecLoadError(
-      `${filePath}: missing 'openapi' version field — this does not look like an OpenAPI 3.x document`,
-    );
-  }
-  if (!openapi.startsWith('3.')) {
-    throw new SpecLoadError(
-      `${filePath}: unsupported OpenAPI version "${openapi}" — API Guard supports 3.0.x and 3.1.x only`,
-    );
-  }
-
-  const specDir = path.dirname(abs);
-  const allowRemote = options.loader?.allowRemoteRefs ?? false;
-  const allowExternal = options.loader?.allowExternalFiles ?? false;
-
-  const remoteRefs = findRemoteRefs(parsed);
-  if (remoteRefs.length > 0 && !allowRemote) {
-    throw new SpecLoadError(
-      `${filePath}: remote $ref(s) denied by default (found ${remoteRefs.length}: ` +
-        `${remoteRefs.slice(0, 3).join(', ')}${remoteRefs.length > 3 ? ', …' : ''}). ` +
-        `Set loader.allow-remote-refs: true in apiguard.yaml to opt in.`,
-    );
-  }
-
-  const externalRefs = findExternalFileRefs(parsed, specDir);
-  if (externalRefs.length > 0 && !allowExternal) {
-    throw new SpecLoadError(
-      `${filePath}: $ref(s) point outside the spec's directory (found ${externalRefs.length}: ` +
-        `${externalRefs.slice(0, 3).join(', ')}${externalRefs.length > 3 ? ', …' : ''}). ` +
-        `External-file refs are not supported in v1.`,
-    );
-  }
-
-  let document: unknown;
-  try {
-    // bundle resolves local file refs and $ref cycles into a self-contained document
-    document = await SwaggerParser.bundle(abs);
-  } catch (e) {
-    throw new SpecLoadError(`${filePath}: parser error: ${errorMessage(e)}`);
-  }
-
-  const info = (parsed.info ?? {}) as Record<string, unknown>;
-  const title = typeof info.title === 'string' ? info.title : '';
-
-  const loaded: LoadedSpec = {
-    document: document as JsonValue,
-    source: filePath,
-    openapiVersion: openapi,
-    title,
-    sha256: '',
-    rawText: text,
-  };
-  return toNormalizedSpec(loaded, normalizeDocument(document));
 }

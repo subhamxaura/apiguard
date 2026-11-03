@@ -16,6 +16,7 @@ export interface DiffOptions {
   markdown?: boolean;
   html?: boolean;
   sarif?: boolean;
+  junit?: boolean;
   config?: string;
   failOn?: string;
   strict?: boolean;
@@ -29,25 +30,30 @@ export interface DiffOptions {
   gitBase?: string;
   profile?: 'default' | 'strict-sdk' | 'loose-web';
   open?: boolean;
+  allowExternalFiles?: boolean;
 }
 
-function resolveFormat(opts: DiffOptions): 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' {
+function resolveFormat(
+  opts: DiffOptions,
+): 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' | 'junit' {
   if (opts.json) return 'json';
   if (opts.markdown) return 'markdown';
   if (opts.html) return 'html';
   if (opts.sarif) return 'sarif';
+  if (opts.junit) return 'junit';
   if (opts.format !== undefined) {
     if (
       opts.format === 'terminal' ||
       opts.format === 'json' ||
       opts.format === 'markdown' ||
       opts.format === 'html' ||
-      opts.format === 'sarif'
+      opts.format === 'sarif' ||
+      opts.format === 'junit'
     ) {
       return opts.format;
     }
     throw new CliUsageError(
-      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif)`,
+      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif|junit)`,
     );
   }
   const envFormat = process.env.APIGUARD_FORMAT;
@@ -56,7 +62,8 @@ function resolveFormat(opts: DiffOptions): 'terminal' | 'json' | 'markdown' | 'h
     envFormat === 'markdown' ||
     envFormat === 'terminal' ||
     envFormat === 'html' ||
-    envFormat === 'sarif'
+    envFormat === 'sarif' ||
+    envFormat === 'junit'
   )
     return envFormat;
   return 'terminal';
@@ -79,7 +86,7 @@ function colorEnabled(opts: DiffOptions, configColor: 'auto' | 'always' | 'never
 
 export async function runDiff(
   oldSpec: string,
-  newSpec: string,
+  newSpec: string | undefined,
   opts: DiffOptions,
   io: CliIo,
 ): Promise<number> {
@@ -109,6 +116,7 @@ export async function runDiff(
     suggestVersion: opts.suggestVersion,
     noColor: !colorEnabled(opts, loaded.config.output.color),
     profile: opts.profile,
+    allowExternalFiles: opts.allowExternalFiles,
   });
 
   const { report } = await analyze(oldSpec, newSpec, {
@@ -133,6 +141,9 @@ export async function runDiff(
     body = renderHtml(report);
   } else if (config.output.format === 'sarif') {
     body = renderSarif(report);
+  } else if (config.output.format === 'junit') {
+    const { renderJunit } = await import('../reporters/junit.js');
+    body = renderJunit(report);
   } else {
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,

@@ -93,13 +93,18 @@ interface Target {
   schema: JsonObject;
 }
 
-function targetOf(ref: string, schemas: JsonObject): Target | undefined {
+function targetOf(ref: string, schemas: unknown): Target | undefined {
   if (!ref.startsWith('#/components/schemas/')) return undefined;
   const parts = ref.slice('#/components/schemas/'.length).split('/').map(unescape);
   let cur: unknown = schemas;
   for (const part of parts) {
-    if (!isObj(cur)) return undefined;
-    cur = cur[part];
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = (cur as JsonObject)[part];
+    } else {
+      return undefined;
+    }
   }
   return isObj(cur) ? { name: parts.join('/'), schema: cur } : undefined;
 }
@@ -143,12 +148,18 @@ export function dereffedPair(
 
 /** Resolve a local components.schemas ref to the target object (original, not expanded). */
 function refTarget(ref: string, schemas: unknown): Target | undefined {
-  if (!isObj(schemas) || !ref.startsWith('#/components/schemas/')) return undefined;
+  if ((!isObj(schemas) && !(schemas instanceof Map)) || !ref.startsWith('#/components/schemas/'))
+    return undefined;
   const parts = ref.slice('#/components/schemas/'.length).split('/').map(unescape);
   let cur: unknown = schemas;
   for (const part of parts) {
-    if (!isObj(cur)) return undefined;
-    cur = cur[part];
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = (cur as JsonObject)[part];
+    } else {
+      return undefined;
+    }
   }
   return isObj(cur) ? { name: parts.join('/'), schema: cur } : undefined;
 }

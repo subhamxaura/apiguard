@@ -15,7 +15,10 @@ export const ignoreSchema = z.strictObject({
 });
 
 export const outputSchema = z.strictObject({
-  format: z.enum(['terminal', 'json', 'markdown', 'html', 'sarif']).optional().default('terminal'),
+  format: z
+    .enum(['terminal', 'json', 'markdown', 'html', 'sarif', 'junit'])
+    .optional()
+    .default('terminal'),
   'include-non-breaking': z.boolean().optional().default(false),
   color: z.enum(['auto', 'always', 'never']).optional().default('auto'),
 });
@@ -68,7 +71,7 @@ export interface ResolvedConfig {
     showIgnored: boolean;
   };
   output: {
-    format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
+    format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' | 'junit';
     includeNonBreaking: boolean;
     color: 'auto' | 'always' | 'never';
   };

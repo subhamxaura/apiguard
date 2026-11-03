@@ -72,38 +72,48 @@ export async function runAction(opts: RunOptions = {}): Promise<RunResult> {
     cwd,
   });
 
-  // Config: explicit input wins; otherwise defaults (the CLI's discovery is cwd-based and
-  // the Action runs from the workspace root — defaults keep behavior predictable).
-  let config: ResolvedConfig = { ...DEFAULT_CONFIG };
-  if (inputs.config) {
-    config = loadConfigFrom(inputs.config).config;
+  try {
+    // Config: explicit input wins; otherwise defaults (the CLI's discovery is cwd-based and
+    // the Action runs from the workspace root — defaults keep behavior predictable).
+    let config: ResolvedConfig = { ...DEFAULT_CONFIG };
+    if (inputs.config) {
+      config = loadConfigFrom(inputs.config).config;
+    }
+
+    const currentPath = path.resolve(cwd, inputs.current);
+    const { report, ignored } = await analyze(baseline.path, currentPath, { config });
+    const breaking = report.summary.bySeverity.error;
+    const warnings = report.summary.bySeverity.warning;
+    const infos = report.summary.bySeverity.info;
+    const ignoredCount = ignored.length;
+
+    const advice = config.versioning.suggest
+      ? report.semver
+      : { bump: 'none' as const, reason: 'suggestion disabled', triggers: [] };
+    const suggestedVersion =
+      advice.bump === 'none' ? 'no bump needed' : `${advice.bump} (${advice.reason})`;
+
+    const verdict: 'fail' | 'pass' = inputs.failOn === 'never' || breaking === 0 ? 'pass' : 'fail';
+
+    const outcome: ActionOutcome = {
+      breaking,
+      warnings,
+      infos,
+      ignored: ignoredCount,
+      suggestedVersion,
+      verdict,
+      baselineVia: baseline.via,
+    };
+    return { outcome, commentBody: renderComment(report, outcome), report };
+  } finally {
+    if (baseline.via === 'merge-base') {
+      try {
+        fs.rmSync(path.dirname(baseline.path), { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   }
-
-  const currentPath = path.resolve(cwd, inputs.current);
-  const { report, ignored } = await analyze(baseline.path, currentPath, { config });
-  const breaking = report.summary.bySeverity.error;
-  const warnings = report.summary.bySeverity.warning;
-  const infos = report.summary.bySeverity.info;
-  const ignoredCount = ignored.length;
-
-  const advice = config.versioning.suggest
-    ? report.semver
-    : { bump: 'none' as const, reason: 'suggestion disabled', triggers: [] };
-  const suggestedVersion =
-    advice.bump === 'none' ? 'no bump needed' : `${advice.bump} (${advice.reason})`;
-
-  const verdict: 'fail' | 'pass' = inputs.failOn === 'never' || breaking === 0 ? 'pass' : 'fail';
-
-  const outcome: ActionOutcome = {
-    breaking,
-    warnings,
-    infos,
-    ignored: ignoredCount,
-    suggestedVersion,
-    verdict,
-    baselineVia: baseline.via,
-  };
-  return { outcome, commentBody: renderComment(report, outcome), report };
 }
 
 /** Post or update an idempotent PR comment with API Guard report. */

@@ -70,6 +70,12 @@ export function resolveContextSeverity(
     // emitter's wasRequired folds in in: path / in: header (§10.5)
     return opts.wasRequired ? 'error' : 'warning';
   }
+  if (ruleId === 'constraint-relaxed' || ruleId === 'constraint-removed') {
+    return side === 'parse' ? 'error' : 'info';
+  }
+  if (ruleId === 'constraint-tightened' || ruleId === 'constraint-added') {
+    return side === 'parse' ? 'info' : 'error';
+  }
   return getRule(ruleId).defaultSeverity;
 }
 
@@ -98,6 +104,10 @@ export function classify(
     'required-property-added',
     'request-body-removed',
     'removed-parameter',
+    'constraint-relaxed',
+    'constraint-removed',
+    'constraint-tightened',
+    'constraint-added',
   ]);
   let baseSeverity: Severity = DOCTRINE_RULES.has(ruleId)
     ? resolveContextSeverity(ruleId, context, doctrine ?? {})

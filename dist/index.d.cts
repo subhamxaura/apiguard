@@ -12,7 +12,7 @@ interface ResolvedConfig {
         showIgnored: boolean;
     };
     output: {
-        format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
+        format: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' | 'junit';
         includeNonBreaking: boolean;
         color: 'auto' | 'always' | 'never';
     };
@@ -207,13 +207,14 @@ declare function suggestVersion(changes: ApiChange[]): SemverAdvice;
 /** Render a standalone, interactive HTML dashboard. */
 declare function renderHtml(report: DiffReport): string;
 
-/**
- * SARIF 2.1.0 reporter for GitHub Advanced Security / Code Scanning integration.
- * Conforms to OASIS SARIF v2.1.0 specification.
- */
-
 /** Render a DiffReport into a SARIF 2.1.0 JSON document. */
 declare function renderSarif(report: DiffReport): string;
+
+/**
+ * JUnit XML reporter per spec §13 for CI/CD test result ingestion (Jenkins, GitLab CI, CircleCI, etc.).
+ */
+
+declare function renderJunit(report: DiffReport): string;
 
 /**
  * Automated API Changelog generator.
@@ -253,4 +254,4 @@ declare function validateSpec(specPath: string, options?: {
     validation: ValidationResult;
 }>;
 
-export { type AnalyzeOptions, type AnalyzeResult, type ApiChange, type ChangeKind, type ChangeLocation, type Context, type DiffReport, type DiffSummary, type LoadedConfig, type LoadedSpec, type NormalizedSpec, type ResolvedConfig, type SemverAdvice, type Severity, type ShimGenerationResult, type ShimTarget, type SpecMeta, type ValidationIssue, type ValidationResult, analyze, discoverAndLoadConfig, generateGatewayShim, loadConfigFrom, renderChangelog, renderHtml, renderSarif, suggestVersion, validateSpec };
+export { type AnalyzeOptions, type AnalyzeResult, type ApiChange, type ChangeKind, type ChangeLocation, type Context, type DiffReport, type DiffSummary, type LoadedConfig, type LoadedSpec, type NormalizedSpec, type ResolvedConfig, type SemverAdvice, type Severity, type ShimGenerationResult, type ShimTarget, type SpecMeta, type ValidationIssue, type ValidationResult, analyze, discoverAndLoadConfig, generateGatewayShim, loadConfigFrom, renderChangelog, renderHtml, renderJunit, renderSarif, suggestVersion, validateSpec };

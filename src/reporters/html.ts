@@ -457,7 +457,7 @@ export function renderHtml(report: DiffReport): string {
     </section>
 
     <div class="semver-banner">
-      <strong>Suggested Version Bump:</strong> ${esc(report.semver.bump.toUpperCase())} &mdash; ${esc(report.semver.reason)}
+      <strong>Suggested Version Bump:</strong> ${esc(report.semver?.bump ? report.semver.bump.toUpperCase() : 'NONE')} &mdash; ${esc(report.semver?.reason ?? 'No bump suggested')}
     </div>
 
     <section class="controls-bar">

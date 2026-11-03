@@ -33,7 +33,7 @@ export function buildProgram(io: CliIo): Command {
   // route help/usage text through CliIo so tests (and embedders) capture it deterministically
   program.configureOutput({
     writeOut: (s) => io.stdout(s.trimEnd()),
-    writeErr: (s) => io.stderr(s.trimEnd()),
+    writeErr: () => {}, // Commander usage errors are formatted and rendered once via renderError in run()
   });
   program
     .name('apiguard')
@@ -44,15 +44,17 @@ export function buildProgram(io: CliIo): Command {
     .command('diff')
     .description('Diff two OpenAPI specs and report breaking changes')
     .argument('<old-spec>', 'baseline spec path')
-    .argument('<new-spec>', 'current spec path')
+    .argument('[new-spec]', 'current spec path')
     .option(
       '--format <f>',
-      'terminal|json|markdown|html|sarif (aliases: --json, --markdown, --html, --sarif)',
+      'terminal|json|markdown|html|sarif|junit (aliases: --json, --markdown, --html, --sarif, --junit)',
     )
     .option('--json', 'shorthand for --format json')
     .option('--markdown', 'shorthand for --format markdown')
     .option('--html', 'shorthand for --format html')
     .option('--sarif', 'shorthand for --format sarif')
+    .option('--junit', 'shorthand for --format junit')
+    .option('--allow-external-files', 'allow $ref to files outside spec directory')
     .option('--open', 'open interactive HTML report in browser')
     .option('--git-base <ref>', 'resolve baseline against git branch or commit')
     .option('--profile <p>', 'client persona profile (default|strict-sdk|loose-web)')
@@ -81,7 +83,7 @@ export function buildProgram(io: CliIo): Command {
     .command('changelog')
     .description('Generate a Keep-a-Changelog formatted release summary from spec diff')
     .argument('<old-spec>', 'baseline spec path')
-    .argument('<new-spec>', 'current spec path')
+    .argument('[new-spec]', 'current spec path')
     .option('--config <path>', 'explicit config file')
     .option('--output <path>', 'write changelog to file')
     .option('--git-base <ref>', 'resolve baseline against git branch or commit')
@@ -98,7 +100,7 @@ export function buildProgram(io: CliIo): Command {
     .command('codegen-shim')
     .description('Generate backward-compatibility gateway adapter for breaking changes')
     .argument('<old-spec>', 'baseline spec path')
-    .argument('<new-spec>', 'current spec path')
+    .argument('[new-spec]', 'current spec path')
     .option('--target <t>', 'express|cloudflare-worker|envoy-lua', 'express')
     .option('--config <path>', 'explicit config file')
     .option('--output <path>', 'write generated shim code to file')
@@ -147,7 +149,8 @@ export async function run(io: CliIo = defaultIo): Promise<number> {
     const code = (program as unknown as { __apiguardExitCode?: number }).__apiguardExitCode;
     return code ?? ExitCode.Ok;
   } catch (err) {
-    io.stderr(renderError(err, io.env.APIGUARD_VERBOSE === '1'));
+    const rendered = renderError(err, io.env.APIGUARD_VERBOSE === '1');
+    if (rendered) io.stderr(rendered);
     return exitCodeFor(err);
   }
 }

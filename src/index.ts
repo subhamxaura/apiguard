@@ -9,6 +9,7 @@ export { discoverAndLoadConfig, loadConfigFrom, type LoadedConfig } from './core
 export { suggestVersion } from './core/versioning/semver-advisor.js';
 export { renderHtml } from './reporters/html.js';
 export { renderSarif } from './reporters/sarif.js';
+export { renderJunit } from './reporters/junit.js';
 export { renderChangelog } from './reporters/changelog.js';
 export { generateGatewayShim, type ShimTarget, type ShimGenerationResult } from './codegen/shim.js';
 export type {

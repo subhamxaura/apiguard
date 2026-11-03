@@ -170,13 +170,14 @@ export function discoverAndLoadConfig(
 export function mergeWithFlags(
   base: ResolvedConfig,
   flags: {
-    format?: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif';
+    format?: 'terminal' | 'json' | 'markdown' | 'html' | 'sarif' | 'junit';
     failOn?: 'error' | 'warning' | 'never';
     includeNonBreaking?: boolean;
     suggestVersion?: boolean;
     noColor?: boolean;
     showIgnored?: boolean;
     profile?: 'default' | 'strict-sdk' | 'loose-web';
+    allowExternalFiles?: boolean;
   },
 ): ResolvedConfig {
   return {
@@ -191,6 +192,10 @@ export function mergeWithFlags(
       suggest: flags.suggestVersion ?? base.versioning.suggest,
     },
     profile: flags.profile ?? base.profile,
+    loader: {
+      ...base.loader,
+      allowExternalFiles: flags.allowExternalFiles ?? base.loader.allowExternalFiles,
+    },
   };
 }
 

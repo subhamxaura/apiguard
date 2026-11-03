@@ -61,10 +61,17 @@ export function diffSchemaNode(
   const seen = opts.seen ?? new Set<string>();
   if (depth > MAX_DEPTH) return; // §11.7: deep nesting must not throw
 
-  // $ref nodes: op-level top sites (depth 0) are covered by the component diff (§10.5b);
-  // deeper refs resolve pairwise so ref-target content changes are caught (§11.4).
+  // $ref nodes: op-level top sites (depth 0) pointing to identical targets are covered by component diff (§10.5b);
+  // when targets differ or one side is inline, resolve pairwise so model swaps and type changes are not silently bypassed (§11.4).
   if (isRefNode(oldSchema) || isRefNode(newSchema)) {
-    if (depth === 0) return;
+    if (
+      depth === 0 &&
+      isRefNode(oldSchema) &&
+      isRefNode(newSchema) &&
+      oldSchema.$ref === newSchema.$ref
+    ) {
+      return;
+    }
     const pair = dereffedPair(
       oldSchema,
       newSchema,
@@ -73,25 +80,35 @@ export function diffSchemaNode(
       seen,
     );
     if (!pair) return;
-    oldSchema = pair.old;
-    newSchema = pair.new;
+    diffSchemaNode(ctx, pair.old, pair.new, pointerOld, pointerNew, location, {
+      ...opts,
+      depth: depth + 1,
+      seen,
+    });
+    return;
   }
   const name = lastToken(pointerNew) || lastToken(pointerOld) || 'value';
+
+  const isParamTop =
+    location.context === 'parameter' &&
+    !pointerOld.includes('/properties/') &&
+    !pointerOld.includes('/items');
 
   // ---- type
   if (!deepEqual(oldSchema.type, newSchema.type)) {
     emit(ctx, {
-      ruleId: 'property-type-changed',
+      ruleId: isParamTop ? 'parameter-type-changed' : 'property-type-changed',
       location: { ...location, pointerOld, pointerNew },
       oldValue: compactType(oldSchema.type),
       newValue: compactType(newSchema.type),
+      doctrine: { sideClass: opts.sideClass },
     });
   }
 
   // ---- format
   if (!deepEqual(oldSchema.format, newSchema.format)) {
     emit(ctx, {
-      ruleId: 'property-format-changed',
+      ruleId: isParamTop ? 'parameter-format-changed' : 'property-format-changed',
       location: {
         ...location,
         pointerOld: `${pointerOld}/format`,
@@ -99,13 +116,14 @@ export function diffSchemaNode(
       },
       oldValue: oldSchema.format,
       newValue: newSchema.format,
+      doctrine: { sideClass: opts.sideClass },
     });
   }
 
   // ---- default
   if (!deepEqual(oldSchema.default, newSchema.default)) {
     emit(ctx, {
-      ruleId: 'property-default-changed',
+      ruleId: isParamTop ? 'parameter-default-changed' : 'property-default-changed',
       location: {
         ...location,
         pointerOld: `${pointerOld}/default`,
@@ -113,23 +131,24 @@ export function diffSchemaNode(
       },
       oldValue: compact(oldSchema.default),
       newValue: compact(newSchema.default),
+      doctrine: { sideClass: opts.sideClass },
     });
   }
 
   // ---- enum
-  diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
 
   // ---- const
   diffConst(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
 
   // ---- constraints
-  diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
 
-  // ---- additionalProperties (map open/close)
-  diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  // ---- additionalProperties (map open/close & recursive schema diff)
+  diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
 
   // ---- composition members
-  diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
 
   // ---- discriminator
   diffDiscriminator(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
@@ -157,8 +176,9 @@ export function diffSchemaNode(
     const newChild = newProps[propName];
     if (newChild === undefined) {
       // property removed — severity by §10.5
+      const isReqHeader = location.context === 'request-header';
       emit(ctx, {
-        ruleId: 'property-removed',
+        ruleId: isReqHeader ? 'request-header-removed' : 'property-removed',
         location: {
           ...location,
           pointerOld: `${pointerOld}/properties/${esc(propName)}`,
@@ -203,6 +223,8 @@ export function diffSchemaNode(
         requiredOld: stringArray(oldChild.required),
         requiredNew: stringArray(newChild.required),
         sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen,
       },
     );
   }
@@ -252,6 +274,8 @@ export function diffSchemaNode(
         requiredOld: stringArrayOf(oldItems.required),
         requiredNew: stringArrayOf(newItems.required),
         sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen,
       },
     );
   }
@@ -280,12 +304,39 @@ function diffEnum(
   pointerNew: string,
   location: LocationBase,
   name: string,
+  opts: DiffOpts,
 ): void {
   const oldEnum = Array.isArray(oldSchema.enum) ? oldSchema.enum : undefined;
   const newEnum = Array.isArray(newSchema.enum) ? newSchema.enum : undefined;
-  if (!oldEnum || !newEnum) return;
+  if (!oldEnum && !newEnum) return;
+
   const ptr = `${pointerOld}/enum`;
   const ptrNew = `${pointerNew}/enum`;
+
+  if (oldEnum === undefined && newEnum !== undefined) {
+    emit(ctx, {
+      ruleId: 'constraint-added',
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: undefined,
+      newValue: compactEnum(newEnum),
+      doctrine: { sideClass: opts.sideClass },
+    });
+    return;
+  }
+
+  if (oldEnum !== undefined && newEnum === undefined) {
+    emit(ctx, {
+      ruleId: 'constraint-removed',
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: compactEnum(oldEnum),
+      newValue: undefined,
+      doctrine: { sideClass: opts.sideClass },
+    });
+    return;
+  }
+
+  if (!oldEnum || !newEnum) return;
+
   const compactOld = compactEnum(oldEnum);
   const compactNew = compactEnum(newEnum);
   for (const v of oldEnum) {
@@ -295,6 +346,7 @@ function diffEnum(
         location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
         oldValue: v,
         newValue: compactNew,
+        doctrine: { sideClass: opts.sideClass },
       });
     }
   }
@@ -305,6 +357,7 @@ function diffEnum(
         location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
         oldValue: compactOld,
         newValue: v,
+        doctrine: { sideClass: opts.sideClass },
       });
     }
   }
@@ -360,6 +413,7 @@ function diffConstraints(
   pointerNew: string,
   location: LocationBase,
   name: string,
+  opts: DiffOpts,
 ): void {
   for (const key of Object.keys(CONSTRAINT_LABEL)) {
     const oldV = oldSchema[key];
@@ -376,6 +430,7 @@ function diffConstraints(
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: undefined,
         newValue: newV,
+        doctrine: { sideClass: opts.sideClass },
       });
       continue;
     }
@@ -384,6 +439,7 @@ function diffConstraints(
         ruleId: 'constraint-removed',
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
+        doctrine: { sideClass: opts.sideClass },
       });
       continue;
     }
@@ -396,6 +452,7 @@ function diffConstraints(
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
         newValue: newV,
+        doctrine: { sideClass: opts.sideClass },
       });
       continue;
     }
@@ -410,6 +467,7 @@ function diffConstraints(
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
         newValue: newV,
+        doctrine: { sideClass: opts.sideClass },
       });
       continue;
     }
@@ -424,6 +482,7 @@ function diffConstraints(
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
         newValue: newV,
+        doctrine: { sideClass: opts.sideClass },
       });
     }
     void name;
@@ -438,6 +497,7 @@ function diffAdditionalProperties(
   pointerNew: string,
   location: LocationBase,
   name: string,
+  opts: DiffOpts,
 ): void {
   const oldClosed = isClosed(oldSchema.additionalProperties);
   const newClosed = isClosed(newSchema.additionalProperties);
@@ -450,6 +510,7 @@ function diffAdditionalProperties(
         pointerOld: `${pointerOld}/additionalProperties`,
         pointerNew: `${pointerNew}/additionalProperties`,
       },
+      doctrine: { sideClass: opts.sideClass },
     });
   } else if (oldClosed && !newClosed) {
     emit(ctx, {
@@ -459,7 +520,33 @@ function diffAdditionalProperties(
         pointerOld: `${pointerOld}/additionalProperties`,
         pointerNew: `${pointerNew}/additionalProperties`,
       },
+      doctrine: { sideClass: opts.sideClass },
     });
+  }
+
+  // Recursive schema diffing for additionalProperties when both provide schemas
+  const oldAp = isObject(oldSchema.additionalProperties)
+    ? oldSchema.additionalProperties
+    : undefined;
+  const newAp = isObject(newSchema.additionalProperties)
+    ? newSchema.additionalProperties
+    : undefined;
+  if (oldAp && newAp) {
+    diffSchemaNode(
+      ctx,
+      oldAp,
+      newAp,
+      `${pointerOld}/additionalProperties`,
+      `${pointerNew}/additionalProperties`,
+      location,
+      {
+        requiredOld: stringArrayOf(oldAp.required),
+        requiredNew: stringArrayOf(newAp.required),
+        sideClass: opts.sideClass,
+        depth: (opts.depth ?? 0) + 1,
+        seen: opts.seen,
+      },
+    );
   }
 }
 
@@ -477,8 +564,10 @@ function diffComposition(
   pointerNew: string,
   location: LocationBase,
   name: string,
+  opts: DiffOpts,
 ): void {
   void name;
+
   // allOf
   const oldAll = Array.isArray(oldSchema.allOf) ? oldSchema.allOf : [];
   const newAll = Array.isArray(newSchema.allOf) ? newSchema.allOf : [];
@@ -492,6 +581,7 @@ function diffComposition(
       },
       oldValue: oldAll.length,
       newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass },
     });
   } else if (newAll.length < oldAll.length) {
     emit(ctx, {
@@ -503,8 +593,20 @@ function diffComposition(
       },
       oldValue: oldAll.length,
       newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass },
     });
   }
+
+  // Deep schema diffing for allOf members with structural identity matching
+  diffCompositionMembers(
+    ctx,
+    oldAll,
+    newAll,
+    `${pointerOld}/allOf`,
+    `${pointerNew}/allOf`,
+    location,
+    opts,
+  );
 
   // anyOf/oneOf
   for (const key of ['anyOf', 'oneOf'] as const) {
@@ -520,6 +622,7 @@ function diffComposition(
         },
         oldValue: oldArr.length,
         newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass },
       });
     } else if (newArr.length < oldArr.length) {
       emit(ctx, {
@@ -531,8 +634,130 @@ function diffComposition(
         },
         oldValue: oldArr.length,
         newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass },
       });
     }
+
+    // Deep schema diffing for anyOf / oneOf members with structural identity matching
+    diffCompositionMembers(
+      ctx,
+      oldArr,
+      newArr,
+      `${pointerOld}/${key}`,
+      `${pointerNew}/${key}`,
+      location,
+      opts,
+    );
+  }
+}
+
+function diffCompositionMembers(
+  ctx: DiffContext,
+  oldArr: unknown[],
+  newArr: unknown[],
+  pointerOld: string,
+  pointerNew: string,
+  location: LocationBase,
+  opts: DiffOpts,
+): void {
+  const depth = (opts.depth ?? 0) + 1;
+  const seen = opts.seen;
+
+  const oldObjects: Array<{ idx: number; obj: JsonObject }> = [];
+  for (let i = 0; i < oldArr.length; i++) {
+    if (isObject(oldArr[i])) oldObjects.push({ idx: i, obj: oldArr[i] as JsonObject });
+  }
+  const newObjects: Array<{ idx: number; obj: JsonObject }> = [];
+  for (let j = 0; j < newArr.length; j++) {
+    if (isObject(newArr[j])) newObjects.push({ idx: j, obj: newArr[j] as JsonObject });
+  }
+
+  const matchedOld = new Set<number>();
+  const matchedNew = new Set<number>();
+  const pairs: Array<{ oldIdx: number; newIdx: number }> = [];
+
+  // 1. Match by exact $ref identity
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.$ref === 'string') {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.$ref === o.obj.$ref);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+
+  // 2. Match by exact title
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.title === 'string' && o.obj.title) {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.title === o.obj.title);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+
+  // 3. Match by deep equality (identical variants do not need diffing)
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    const match = newObjects.find((n) => !matchedNew.has(n.idx) && deepEqual(o.obj, n.obj));
+    if (match) {
+      matchedOld.add(o.idx);
+      matchedNew.add(match.idx);
+    }
+  }
+
+  // 4. Match by matching type (e.g. both 'string', or both 'object')
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (o.obj.type !== undefined) {
+      const match = newObjects.find(
+        (n) => !matchedNew.has(n.idx) && deepEqual(o.obj.type, n.obj.type),
+      );
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+
+  // 5. Match remaining unmatched in positional order
+  const remainingOld = oldObjects.filter((o) => !matchedOld.has(o.idx));
+  const remainingNew = newObjects.filter((n) => !matchedNew.has(n.idx));
+  const minRemaining = Math.min(remainingOld.length, remainingNew.length);
+  for (let k = 0; k < minRemaining; k++) {
+    const o = remainingOld[k];
+    const n = remainingNew[k];
+    if (o && n) {
+      pairs.push({ oldIdx: o.idx, newIdx: n.idx });
+    }
+  }
+
+  // Diff the paired members
+  for (const pair of pairs) {
+    const oM = oldArr[pair.oldIdx] as JsonObject;
+    const nM = newArr[pair.newIdx] as JsonObject;
+    diffSchemaNode(
+      ctx,
+      oM,
+      nM,
+      `${pointerOld}/${pair.oldIdx}`,
+      `${pointerNew}/${pair.newIdx}`,
+      location,
+      {
+        requiredOld: stringArrayOf(oM.required),
+        requiredNew: stringArrayOf(nM.required),
+        sideClass: opts.sideClass,
+        depth,
+        seen,
+      },
+    );
   }
 }
 

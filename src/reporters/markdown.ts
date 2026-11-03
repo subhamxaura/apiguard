@@ -83,7 +83,7 @@ export function renderMarkdown(report: DiffReport): string {
 
 /** Bump line for markdown footer when requested. */
 export function markdownBumpLine(report: DiffReport): string | null {
-  const bump = report.semver.bump;
+  const bump = report.semver?.bump ?? 'none';
   if (bump === 'none') return null;
   const label = bump === 'major' ? 'MAJOR' : bump === 'minor' ? 'MINOR' : 'PATCH';
   return `Suggested version bump: ${label}`;

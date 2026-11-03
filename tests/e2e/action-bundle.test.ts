@@ -11,7 +11,7 @@ import os from 'node:os';
 import esbuild from 'esbuild';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const BUNDLE = path.join(ROOT, 'dist/index.cjs');
+const BUNDLE = path.join(ROOT, 'dist/action.cjs');
 
 let workspace = '';
 let made = false;

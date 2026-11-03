@@ -95,7 +95,7 @@ function renderMarkdown(report) {
   return lines.join("\n");
 }
 function markdownBumpLine(report) {
-  const bump = report.semver.bump;
+  const bump = report.semver?.bump ?? "none";
   if (bump === "none") return null;
   const label = bump === "major" ? "MAJOR" : bump === "minor" ? "MINOR" : "PATCH";
   return `Suggested version bump: ${label}`;
@@ -109,6 +109,67 @@ var init_markdown = __esm({
       warning: "Warnings",
       info: "Informational"
     };
+  }
+});
+
+// src/reporters/junit.ts
+var junit_exports = {};
+__export(junit_exports, {
+  renderJunit: () => renderJunit
+});
+function escapeXml(unsafe) {
+  return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+function renderJunit(report) {
+  const breakingCount = report.summary.bySeverity.error;
+  const totalTests = report.changes.length === 0 ? 1 : report.changes.length;
+  const failures = breakingCount;
+  const lines = [];
+  lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+  lines.push(
+    `<testsuites name="API Guard" tests="${totalTests}" failures="${failures}" errors="0" time="0">`
+  );
+  lines.push(
+    `  <testsuite name="OpenAPI Contract Changes" tests="${totalTests}" failures="${failures}" errors="0" skipped="0" time="0">`
+  );
+  if (report.changes.length === 0) {
+    lines.push('    <testcase classname="api" name="contract-compatibility" time="0"/>');
+  } else {
+    for (const c of report.changes) {
+      const classname = escapeXml(c.location.context);
+      const name = escapeXml(
+        `${c.ruleId}${c.location.method ? " " + c.location.method : ""}${c.location.path ? " " + c.location.path : ""}`
+      );
+      lines.push(`    <testcase classname="${classname}" name="${name}" time="0">`);
+      if (c.breaking) {
+        const message = escapeXml(c.message);
+        const ptr = c.location.pointerNew || c.location.pointerOld || "";
+        const bodyText = escapeXml(
+          `Rule: ${c.ruleId}
+Severity: ${c.severity}
+Location: ${c.location.path} (${ptr})
+Suggestion: ${c.suggestion}`
+        );
+        lines.push(
+          `      <failure message="${message}" type="${escapeXml(c.ruleId)}">${bodyText}</failure>`
+        );
+      } else {
+        const infoText = escapeXml(
+          `[${c.severity.toUpperCase()}] ${c.message}
+Suggestion: ${c.suggestion}`
+        );
+        lines.push(`      <system-out>${infoText}</system-out>`);
+      }
+      lines.push("    </testcase>");
+    }
+  }
+  lines.push("  </testsuite>");
+  lines.push("</testsuites>");
+  return lines.join("\n");
+}
+var init_junit = __esm({
+  "src/reporters/junit.ts"() {
+    "use strict";
   }
 });
 
@@ -133,7 +194,7 @@ var ignoreSchema = import_zod.z.strictObject({
   "show-ignored": import_zod.z.boolean().optional().default(false)
 });
 var outputSchema = import_zod.z.strictObject({
-  format: import_zod.z.enum(["terminal", "json", "markdown", "html", "sarif"]).optional().default("terminal"),
+  format: import_zod.z.enum(["terminal", "json", "markdown", "html", "sarif", "junit"]).optional().default("terminal"),
   "include-non-breaking": import_zod.z.boolean().optional().default(false),
   color: import_zod.z.enum(["auto", "always", "never"]).optional().default("auto")
 });
@@ -371,7 +432,11 @@ function mergeWithFlags(base, flags) {
     versioning: {
       suggest: flags.suggestVersion ?? base.versioning.suggest
     },
-    profile: flags.profile ?? base.profile
+    profile: flags.profile ?? base.profile,
+    loader: {
+      ...base.loader,
+      allowExternalFiles: flags.allowExternalFiles ?? base.loader.allowExternalFiles
+    }
   };
 }
 
@@ -384,7 +449,7 @@ function exitCodeFor(err) {
     if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
       return ExitCode.Ok;
     }
-    return err.exitCode > 0 ? err.exitCode : ExitCode.Usage;
+    return ExitCode.Usage;
   }
   if (err instanceof ApiguardError) return err.exitCode;
   return ExitCode.Internal;
@@ -392,13 +457,16 @@ function exitCodeFor(err) {
 function renderError(err, verbose = false) {
   if (isCommanderError(err)) {
     if (err.code === "commander.helpDisplayed" || err.code === "commander.version") return "";
-    return `error: ${err.message}`;
+    const cleanMsg2 = err.message.replace(/^error:\s*/i, "");
+    return `error: ${cleanMsg2}`;
   }
   if (err instanceof ApiguardError) {
     const hint = err.exitCode === ExitCode.Internal ? " (please report this bug)" : "";
-    return `error: ${err.message}${hint}${verbose && err.stack ? "\n" + err.stack : ""}`;
+    const cleanMsg2 = err.message.replace(/^error:\s*/i, "");
+    return `error: ${cleanMsg2}${hint}${verbose && err.stack ? "\n" + err.stack : ""}`;
   }
-  return `error: unexpected internal error: ${errorMessage(err)} (please report this bug)`;
+  const cleanMsg = errorMessage(err).replace(/^error:\s*/i, "");
+  return `error: unexpected internal error: ${cleanMsg} (please report this bug)`;
 }
 
 // src/cli/diff-command.ts
@@ -473,16 +541,23 @@ function normalizeNode(node) {
   const nullable = obj.nullable === true;
   if (typeof typeValue === "string") typeValue = [typeValue];
   if (Array.isArray(typeValue)) typeValue = [...typeValue].sort();
-  if (nullable && Array.isArray(typeValue)) {
-    typeValue = typeValue.includes("null") ? typeValue : [...typeValue, "null"].sort();
+  if (nullable) {
+    if (Array.isArray(typeValue)) {
+      typeValue = typeValue.includes("null") ? typeValue : [...typeValue, "null"].sort();
+    } else if (typeValue === void 0) {
+      typeValue = ["null"];
+    }
+  }
+  const allKeys = new Set(Object.keys(obj));
+  allKeys.delete("nullable");
+  if (typeValue !== void 0) {
+    allKeys.add("type");
   }
   const out = {};
-  for (const key of Object.keys(obj).sort()) {
+  for (const key of Array.from(allKeys).sort()) {
     switch (key) {
       case "type":
         if (typeValue !== void 0) out.type = typeValue;
-        break;
-      case "nullable":
         break;
       case "exclusiveMinimum":
         if (exclusiveMin !== void 0) out.exclusiveMinimum = exclusiveMin;
@@ -575,9 +650,10 @@ function fetchGitSpec(gitUri, cwd = process.cwd()) {
   }
   const rev = stripped.slice(0, colonIdx);
   const relPath = stripped.slice(colonIdx + 1);
+  const gitRelPath = relPath.replace(/\\/g, "/");
   let text;
   try {
-    text = (0, import_node_child_process.execFileSync)("git", ["show", `${rev}:${relPath}`], { cwd, encoding: "utf8" });
+    text = (0, import_node_child_process.execFileSync)("git", ["show", `${rev}:${gitRelPath}`], { cwd, encoding: "utf8" });
   } catch (e) {
     throw new SpecLoadError(
       `${gitUri}: failed to retrieve spec from git (${rev}:${relPath}): ${errorMessage(e)}`
@@ -668,69 +744,83 @@ function findExternalFileRefs(document, specDir) {
 async function loadSpec(filePath, options = {}) {
   let abs;
   let text;
-  if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
-    const fetched = await fetchRemoteSpec(filePath, options.loader);
-    abs = fetched.localPath;
-    text = fetched.text;
-  } else if (filePath.startsWith("git://") || filePath.startsWith("git:")) {
-    const fetched = fetchGitSpec(filePath, options.cwd);
-    abs = fetched.localPath;
-    text = fetched.text;
-  } else {
-    abs = import_node_path2.default.resolve(filePath);
+  let tmpDirToClean;
+  try {
+    if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+      const fetched = await fetchRemoteSpec(filePath, options.loader);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = import_node_path2.default.dirname(fetched.localPath);
+    } else if (filePath.startsWith("git://") || filePath.startsWith("git:")) {
+      const fetched = fetchGitSpec(filePath, options.cwd);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = import_node_path2.default.dirname(fetched.localPath);
+    } else {
+      abs = import_node_path2.default.resolve(filePath);
+      try {
+        text = import_node_fs2.default.readFileSync(abs, "utf8");
+      } catch (e) {
+        throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+      }
+    }
+    if (text.trim() === "") {
+      throw new SpecLoadError(
+        `${filePath}: file is empty \u2014 a spec must contain an OpenAPI document`
+      );
+    }
+    const parsed = parseSpecText(text, filePath);
+    const openapi = typeof parsed.openapi === "string" ? parsed.openapi : "";
+    if (!openapi) {
+      throw new SpecLoadError(
+        `${filePath}: missing 'openapi' version field \u2014 this does not look like an OpenAPI 3.x document`
+      );
+    }
+    if (!openapi.startsWith("3.")) {
+      throw new SpecLoadError(
+        `${filePath}: unsupported OpenAPI version "${openapi}" \u2014 API Guard supports 3.0.x and 3.1.x only`
+      );
+    }
+    const specDir = import_node_path2.default.dirname(abs);
+    const allowRemote = options.loader?.allowRemoteRefs ?? false;
+    const allowExternal = options.loader?.allowExternalFiles ?? false;
+    const remoteRefs = findRemoteRefs(parsed);
+    if (remoteRefs.length > 0 && !allowRemote) {
+      throw new SpecLoadError(
+        `${filePath}: remote $ref(s) denied by default (found ${remoteRefs.length}: ${remoteRefs.slice(0, 3).join(", ")}${remoteRefs.length > 3 ? ", \u2026" : ""}). Set loader.allow-remote-refs: true in apiguard.yaml to opt in.`
+      );
+    }
+    const externalRefs = findExternalFileRefs(parsed, specDir);
+    if (externalRefs.length > 0 && !allowExternal) {
+      throw new SpecLoadError(
+        `${filePath}: $ref(s) point outside the spec's directory (found ${externalRefs.length}: ${externalRefs.slice(0, 3).join(", ")}${externalRefs.length > 3 ? ", \u2026" : ""}). External-file refs are not supported in v1.`
+      );
+    }
+    let document;
     try {
-      text = import_node_fs2.default.readFileSync(abs, "utf8");
+      document = await import_swagger_parser.default.bundle(abs);
     } catch (e) {
-      throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+      throw new SpecLoadError(`${filePath}: parser error: ${errorMessage(e)}`);
+    }
+    const info = parsed.info ?? {};
+    const title = typeof info.title === "string" ? info.title : "";
+    const loaded = {
+      document,
+      source: filePath,
+      openapiVersion: openapi,
+      title,
+      sha256: "",
+      rawText: text
+    };
+    return toNormalizedSpec(loaded, normalizeDocument(document));
+  } finally {
+    if (tmpDirToClean) {
+      try {
+        import_node_fs2.default.rmSync(tmpDirToClean, { recursive: true, force: true });
+      } catch {
+      }
     }
   }
-  if (text.trim() === "") {
-    throw new SpecLoadError(`${filePath}: file is empty \u2014 a spec must contain an OpenAPI document`);
-  }
-  const parsed = parseSpecText(text, filePath);
-  const openapi = typeof parsed.openapi === "string" ? parsed.openapi : "";
-  if (!openapi) {
-    throw new SpecLoadError(
-      `${filePath}: missing 'openapi' version field \u2014 this does not look like an OpenAPI 3.x document`
-    );
-  }
-  if (!openapi.startsWith("3.")) {
-    throw new SpecLoadError(
-      `${filePath}: unsupported OpenAPI version "${openapi}" \u2014 API Guard supports 3.0.x and 3.1.x only`
-    );
-  }
-  const specDir = import_node_path2.default.dirname(abs);
-  const allowRemote = options.loader?.allowRemoteRefs ?? false;
-  const allowExternal = options.loader?.allowExternalFiles ?? false;
-  const remoteRefs = findRemoteRefs(parsed);
-  if (remoteRefs.length > 0 && !allowRemote) {
-    throw new SpecLoadError(
-      `${filePath}: remote $ref(s) denied by default (found ${remoteRefs.length}: ${remoteRefs.slice(0, 3).join(", ")}${remoteRefs.length > 3 ? ", \u2026" : ""}). Set loader.allow-remote-refs: true in apiguard.yaml to opt in.`
-    );
-  }
-  const externalRefs = findExternalFileRefs(parsed, specDir);
-  if (externalRefs.length > 0 && !allowExternal) {
-    throw new SpecLoadError(
-      `${filePath}: $ref(s) point outside the spec's directory (found ${externalRefs.length}: ${externalRefs.slice(0, 3).join(", ")}${externalRefs.length > 3 ? ", \u2026" : ""}). External-file refs are not supported in v1.`
-    );
-  }
-  let document;
-  try {
-    document = await import_swagger_parser.default.bundle(abs);
-  } catch (e) {
-    throw new SpecLoadError(`${filePath}: parser error: ${errorMessage(e)}`);
-  }
-  const info = parsed.info ?? {};
-  const title = typeof info.title === "string" ? info.title : "";
-  const loaded = {
-    document,
-    source: filePath,
-    openapiVersion: openapi,
-    title,
-    sha256: "",
-    rawText: text
-  };
-  return toNormalizedSpec(loaded, normalizeDocument(document));
 }
 
 // src/core/models/report.ts
@@ -1638,6 +1728,12 @@ function resolveContextSeverity(ruleId, context, opts) {
   if (ruleId === "removed-parameter") {
     return opts.wasRequired ? "error" : "warning";
   }
+  if (ruleId === "constraint-relaxed" || ruleId === "constraint-removed") {
+    return side === "parse" ? "error" : "info";
+  }
+  if (ruleId === "constraint-tightened" || ruleId === "constraint-added") {
+    return side === "parse" ? "info" : "error";
+  }
   return getRule(ruleId).defaultSeverity;
 }
 function classify(ruleId, context, options, doctrine) {
@@ -1654,7 +1750,11 @@ function classify(ruleId, context, options, doctrine) {
     "property-removed",
     "required-property-added",
     "request-body-removed",
-    "removed-parameter"
+    "removed-parameter",
+    "constraint-relaxed",
+    "constraint-removed",
+    "constraint-tightened",
+    "constraint-added"
   ]);
   let baseSeverity = DOCTRINE_RULES.has(ruleId) ? resolveContextSeverity(ruleId, context, doctrine ?? {}) : rule.defaultSeverity;
   if (override === void 0 && options.profile) {
@@ -1835,10 +1935,10 @@ function methodRank(method) {
 function compareChanges(a, b) {
   const sev = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
   if (sev !== 0) return sev;
-  const path4 = (a.location.path ?? "").localeCompare(b.location.path ?? "", "en", {
+  const path5 = (a.location.path ?? "").localeCompare(b.location.path ?? "", "en", {
     sensitivity: "variant"
   });
-  if (path4 !== 0) return path4;
+  if (path5 !== 0) return path5;
   const meth = methodRank(a.location.method) - methodRank(b.location.method);
   if (meth !== 0) return meth;
   const po = a.location.pointerOld.localeCompare(b.location.pointerOld, "en", {
@@ -2037,8 +2137,13 @@ function targetOf(ref, schemas) {
   const parts = ref.slice("#/components/schemas/".length).split("/").map(unescape);
   let cur = schemas;
   for (const part of parts) {
-    if (!isObj(cur)) return void 0;
-    cur = cur[part];
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = cur[part];
+    } else {
+      return void 0;
+    }
   }
   return isObj(cur) ? { name: parts.join("/"), schema: cur } : void 0;
 }
@@ -2060,12 +2165,18 @@ function dereffedPair(oldNode, newNode, oldSchemas, newSchemas, seen) {
   return { old: oldResolved, new: newResolved };
 }
 function refTarget(ref, schemas) {
-  if (!isObj(schemas) || !ref.startsWith("#/components/schemas/")) return void 0;
+  if (!isObj(schemas) && !(schemas instanceof Map) || !ref.startsWith("#/components/schemas/"))
+    return void 0;
   const parts = ref.slice("#/components/schemas/".length).split("/").map(unescape);
   let cur = schemas;
   for (const part of parts) {
-    if (!isObj(cur)) return void 0;
-    cur = cur[part];
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = cur[part];
+    } else {
+      return void 0;
+    }
   }
   return isObj(cur) ? { name: parts.join("/"), schema: cur } : void 0;
 }
@@ -2102,7 +2213,9 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
   const seen = opts.seen ?? /* @__PURE__ */ new Set();
   if (depth > MAX_DEPTH) return;
   if (isRefNode(oldSchema) || isRefNode(newSchema)) {
-    if (depth === 0) return;
+    if (depth === 0 && isRefNode(oldSchema) && isRefNode(newSchema) && oldSchema.$ref === newSchema.$ref) {
+      return;
+    }
     const pair = dereffedPair(
       oldSchema,
       newSchema,
@@ -2111,47 +2224,55 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
       seen
     );
     if (!pair) return;
-    oldSchema = pair.old;
-    newSchema = pair.new;
+    diffSchemaNode(ctx, pair.old, pair.new, pointerOld, pointerNew, location, {
+      ...opts,
+      depth: depth + 1,
+      seen
+    });
+    return;
   }
   const name = lastToken(pointerNew) || lastToken(pointerOld) || "value";
+  const isParamTop = location.context === "parameter" && !pointerOld.includes("/properties/") && !pointerOld.includes("/items");
   if (!deepEqual(oldSchema.type, newSchema.type)) {
     emit(ctx, {
-      ruleId: "property-type-changed",
+      ruleId: isParamTop ? "parameter-type-changed" : "property-type-changed",
       location: { ...location, pointerOld, pointerNew },
       oldValue: compactType(oldSchema.type),
-      newValue: compactType(newSchema.type)
+      newValue: compactType(newSchema.type),
+      doctrine: { sideClass: opts.sideClass }
     });
   }
   if (!deepEqual(oldSchema.format, newSchema.format)) {
     emit(ctx, {
-      ruleId: "property-format-changed",
+      ruleId: isParamTop ? "parameter-format-changed" : "property-format-changed",
       location: {
         ...location,
         pointerOld: `${pointerOld}/format`,
         pointerNew: `${pointerNew}/format`
       },
       oldValue: oldSchema.format,
-      newValue: newSchema.format
+      newValue: newSchema.format,
+      doctrine: { sideClass: opts.sideClass }
     });
   }
   if (!deepEqual(oldSchema.default, newSchema.default)) {
     emit(ctx, {
-      ruleId: "property-default-changed",
+      ruleId: isParamTop ? "parameter-default-changed" : "property-default-changed",
       location: {
         ...location,
         pointerOld: `${pointerOld}/default`,
         pointerNew: `${pointerNew}/default`
       },
       oldValue: compact(oldSchema.default),
-      newValue: compact(newSchema.default)
+      newValue: compact(newSchema.default),
+      doctrine: { sideClass: opts.sideClass }
     });
   }
-  diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
   diffConst(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
-  diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
-  diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
-  diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
   diffDiscriminator(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
   if (!deepEqual(oldSchema.description, newSchema.description) || !deepEqual(oldSchema.title, newSchema.title) || !deepEqual(oldSchema.example, newSchema.example)) {
     emit(ctx, {
@@ -2167,8 +2288,9 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
     const oldChild = oldProps[propName];
     const newChild = newProps[propName];
     if (newChild === void 0) {
+      const isReqHeader = location.context === "request-header";
       emit(ctx, {
-        ruleId: "property-removed",
+        ruleId: isReqHeader ? "request-header-removed" : "property-removed",
         location: {
           ...location,
           pointerOld: `${pointerOld}/properties/${escape(propName)}`,
@@ -2208,7 +2330,9 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
       {
         requiredOld: stringArray2(oldChild.required),
         requiredNew: stringArray2(newChild.required),
-        sideClass: opts.sideClass
+        sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen
       }
     );
   }
@@ -2253,7 +2377,9 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
       {
         requiredOld: stringArrayOf(oldItems.required),
         requiredNew: stringArrayOf(newItems.required),
-        sideClass: opts.sideClass
+        sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen
       }
     );
   }
@@ -2271,12 +2397,33 @@ function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, locat
     }
   }
 }
-function diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+function diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
   const oldEnum = Array.isArray(oldSchema.enum) ? oldSchema.enum : void 0;
   const newEnum = Array.isArray(newSchema.enum) ? newSchema.enum : void 0;
-  if (!oldEnum || !newEnum) return;
+  if (!oldEnum && !newEnum) return;
   const ptr = `${pointerOld}/enum`;
   const ptrNew = `${pointerNew}/enum`;
+  if (oldEnum === void 0 && newEnum !== void 0) {
+    emit(ctx, {
+      ruleId: "constraint-added",
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: void 0,
+      newValue: compactEnum(newEnum),
+      doctrine: { sideClass: opts.sideClass }
+    });
+    return;
+  }
+  if (oldEnum !== void 0 && newEnum === void 0) {
+    emit(ctx, {
+      ruleId: "constraint-removed",
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: compactEnum(oldEnum),
+      newValue: void 0,
+      doctrine: { sideClass: opts.sideClass }
+    });
+    return;
+  }
+  if (!oldEnum || !newEnum) return;
   const compactOld = compactEnum(oldEnum);
   const compactNew = compactEnum(newEnum);
   for (const v of oldEnum) {
@@ -2285,7 +2432,8 @@ function diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, n
         ruleId: "enum-value-removed",
         location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
         oldValue: v,
-        newValue: compactNew
+        newValue: compactNew,
+        doctrine: { sideClass: opts.sideClass }
       });
     }
   }
@@ -2295,7 +2443,8 @@ function diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, n
         ruleId: "enum-value-added",
         location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
         oldValue: compactOld,
-        newValue: v
+        newValue: v,
+        doctrine: { sideClass: opts.sideClass }
       });
     }
   }
@@ -2332,7 +2481,7 @@ function diffConst(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, 
     });
   }
 }
-function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
   for (const key of Object.keys(CONSTRAINT_LABEL)) {
     const oldV = oldSchema[key];
     const newV = newSchema[key];
@@ -2345,7 +2494,8 @@ function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         ruleId: "constraint-added",
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: void 0,
-        newValue: newV
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
       });
       continue;
     }
@@ -2353,7 +2503,8 @@ function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
       emit(ctx, {
         ruleId: "constraint-removed",
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
-        oldValue: oldV
+        oldValue: oldV,
+        doctrine: { sideClass: opts.sideClass }
       });
       continue;
     }
@@ -2363,7 +2514,8 @@ function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         ruleId: "constraint-tightened",
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
-        newValue: newV
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
       });
       continue;
     }
@@ -2376,7 +2528,8 @@ function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         ruleId: dir === "tightened" ? "constraint-tightened" : "constraint-relaxed",
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
-        newValue: newV
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
       });
       continue;
     }
@@ -2389,13 +2542,14 @@ function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         ruleId: dir === "tightened" ? "constraint-tightened" : "constraint-relaxed",
         location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
         oldValue: oldV,
-        newValue: newV
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
       });
     }
     void name;
   }
 }
-function diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+function diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
   const oldClosed = isClosed(oldSchema.additionalProperties);
   const newClosed = isClosed(newSchema.additionalProperties);
   void name;
@@ -2406,7 +2560,8 @@ function diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointer
         ...location,
         pointerOld: `${pointerOld}/additionalProperties`,
         pointerNew: `${pointerNew}/additionalProperties`
-      }
+      },
+      doctrine: { sideClass: opts.sideClass }
     });
   } else if (oldClosed && !newClosed) {
     emit(ctx, {
@@ -2415,15 +2570,35 @@ function diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointer
         ...location,
         pointerOld: `${pointerOld}/additionalProperties`,
         pointerNew: `${pointerNew}/additionalProperties`
-      }
+      },
+      doctrine: { sideClass: opts.sideClass }
     });
+  }
+  const oldAp = isObject(oldSchema.additionalProperties) ? oldSchema.additionalProperties : void 0;
+  const newAp = isObject(newSchema.additionalProperties) ? newSchema.additionalProperties : void 0;
+  if (oldAp && newAp) {
+    diffSchemaNode(
+      ctx,
+      oldAp,
+      newAp,
+      `${pointerOld}/additionalProperties`,
+      `${pointerNew}/additionalProperties`,
+      location,
+      {
+        requiredOld: stringArrayOf(oldAp.required),
+        requiredNew: stringArrayOf(newAp.required),
+        sideClass: opts.sideClass,
+        depth: (opts.depth ?? 0) + 1,
+        seen: opts.seen
+      }
+    );
   }
 }
 function isClosed(v) {
   if (v === void 0 || v === true) return false;
   return true;
 }
-function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
   void name;
   const oldAll = Array.isArray(oldSchema.allOf) ? oldSchema.allOf : [];
   const newAll = Array.isArray(newSchema.allOf) ? newSchema.allOf : [];
@@ -2436,7 +2611,8 @@ function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         pointerNew: `${pointerNew}/allOf`
       },
       oldValue: oldAll.length,
-      newValue: newAll.length
+      newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass }
     });
   } else if (newAll.length < oldAll.length) {
     emit(ctx, {
@@ -2447,9 +2623,19 @@ function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
         pointerNew: `${pointerNew}/allOf`
       },
       oldValue: oldAll.length,
-      newValue: newAll.length
+      newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass }
     });
   }
+  diffCompositionMembers(
+    ctx,
+    oldAll,
+    newAll,
+    `${pointerOld}/allOf`,
+    `${pointerNew}/allOf`,
+    location,
+    opts
+  );
   for (const key of ["anyOf", "oneOf"]) {
     const oldArr = Array.isArray(oldSchema[key]) ? oldSchema[key] : [];
     const newArr = Array.isArray(newSchema[key]) ? newSchema[key] : [];
@@ -2462,7 +2648,8 @@ function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
           pointerNew: `${pointerNew}/${key}`
         },
         oldValue: oldArr.length,
-        newValue: newArr.length
+        newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass }
       });
     } else if (newArr.length < oldArr.length) {
       emit(ctx, {
@@ -2473,9 +2660,106 @@ function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, loca
           pointerNew: `${pointerNew}/${key}`
         },
         oldValue: oldArr.length,
-        newValue: newArr.length
+        newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass }
       });
     }
+    diffCompositionMembers(
+      ctx,
+      oldArr,
+      newArr,
+      `${pointerOld}/${key}`,
+      `${pointerNew}/${key}`,
+      location,
+      opts
+    );
+  }
+}
+function diffCompositionMembers(ctx, oldArr, newArr, pointerOld, pointerNew, location, opts) {
+  const depth = (opts.depth ?? 0) + 1;
+  const seen = opts.seen;
+  const oldObjects = [];
+  for (let i = 0; i < oldArr.length; i++) {
+    if (isObject(oldArr[i])) oldObjects.push({ idx: i, obj: oldArr[i] });
+  }
+  const newObjects = [];
+  for (let j = 0; j < newArr.length; j++) {
+    if (isObject(newArr[j])) newObjects.push({ idx: j, obj: newArr[j] });
+  }
+  const matchedOld = /* @__PURE__ */ new Set();
+  const matchedNew = /* @__PURE__ */ new Set();
+  const pairs = [];
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.$ref === "string") {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.$ref === o.obj.$ref);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.title === "string" && o.obj.title) {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.title === o.obj.title);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    const match = newObjects.find((n) => !matchedNew.has(n.idx) && deepEqual(o.obj, n.obj));
+    if (match) {
+      matchedOld.add(o.idx);
+      matchedNew.add(match.idx);
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (o.obj.type !== void 0) {
+      const match = newObjects.find(
+        (n) => !matchedNew.has(n.idx) && deepEqual(o.obj.type, n.obj.type)
+      );
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  const remainingOld = oldObjects.filter((o) => !matchedOld.has(o.idx));
+  const remainingNew = newObjects.filter((n) => !matchedNew.has(n.idx));
+  const minRemaining = Math.min(remainingOld.length, remainingNew.length);
+  for (let k = 0; k < minRemaining; k++) {
+    const o = remainingOld[k];
+    const n = remainingNew[k];
+    if (o && n) {
+      pairs.push({ oldIdx: o.idx, newIdx: n.idx });
+    }
+  }
+  for (const pair of pairs) {
+    const oM = oldArr[pair.oldIdx];
+    const nM = newArr[pair.newIdx];
+    diffSchemaNode(
+      ctx,
+      oM,
+      nM,
+      `${pointerOld}/${pair.oldIdx}`,
+      `${pointerNew}/${pair.newIdx}`,
+      location,
+      {
+        requiredOld: stringArrayOf(oM.required),
+        requiredNew: stringArrayOf(nM.required),
+        sideClass: opts.sideClass,
+        depth,
+        seen
+      }
+    );
   }
 }
 function diffDiscriminator(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
@@ -2797,19 +3081,29 @@ function methodKeys(item) {
     )
   ).map((k) => k.toUpperCase()).sort();
 }
-function diffOperationPair(ctx, path4, method, oldItem, newItem) {
+function opPointer(baseLoc, ...sub) {
+  const prefix = baseLoc.pointerPrefix ?? (baseLoc.method ? ["paths", baseLoc.path, baseLoc.method.toLowerCase()] : ["paths", baseLoc.path]);
+  return pointerJoin(...prefix, ...sub);
+}
+function diffOperationPair(ctx, path5, method, oldItem, newItem, overrides) {
   const oldOp = isObject(oldItem[method.toLowerCase()]) ? oldItem[method.toLowerCase()] : {};
   const newOp = isObject(newItem[method.toLowerCase()]) ? newItem[method.toLowerCase()] : {};
-  const baseLoc = { path: path4, method };
+  const baseLoc = {
+    path: path5,
+    method,
+    pointerPrefix: overrides?.pointerPrefix,
+    context: overrides?.context
+  };
+  const opContext = baseLoc.context ?? "operation";
   if (!deepEqual(oldOp.operationId, newOp.operationId)) {
     emit(ctx, {
       ruleId: "operation-id-changed",
       location: {
         ...baseLoc,
         operationId: typeof newOp.operationId === "string" ? newOp.operationId : void 0,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "operationId"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "operationId"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "operationId"),
+        pointerNew: opPointer(baseLoc, "operationId"),
+        context: opContext
       },
       oldValue: oldOp.operationId,
       newValue: newOp.operationId
@@ -2822,9 +3116,9 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
       ruleId: "operation-deprecated-added",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "deprecated"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "deprecated"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "deprecated"),
+        pointerNew: opPointer(baseLoc, "deprecated"),
+        context: opContext
       }
     });
   } else if (oldDep && !newDep) {
@@ -2832,9 +3126,9 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
       ruleId: "operation-deprecated-removed",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "deprecated"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "deprecated"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "deprecated"),
+        pointerNew: opPointer(baseLoc, "deprecated"),
+        context: opContext
       }
     });
   }
@@ -2843,9 +3137,9 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
       ruleId: "operation-tags-changed",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "tags"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "tags"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "tags"),
+        pointerNew: opPointer(baseLoc, "tags"),
+        context: opContext
       },
       oldValue: compact2(oldOp.tags),
       newValue: compact2(newOp.tags)
@@ -2856,9 +3150,9 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
       ruleId: "operation-summary-changed",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "summary"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "summary"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "summary"),
+        pointerNew: opPointer(baseLoc, "summary"),
+        context: opContext
       },
       oldValue: oldOp.summary,
       newValue: newOp.summary
@@ -2869,9 +3163,9 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
       ruleId: "operation-description-changed",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "description"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "description"),
-        context: "operation"
+        pointerOld: opPointer(baseLoc, "description"),
+        pointerNew: opPointer(baseLoc, "description"),
+        context: opContext
       },
       oldValue: oldOp.description,
       newValue: newOp.description
@@ -2879,7 +3173,7 @@ function diffOperationPair(ctx, path4, method, oldItem, newItem) {
   }
   diffNamedMap(ctx, oldOp.callbacks, newOp.callbacks, "callback-added", "callback-removed", {
     ...baseLoc,
-    context: "operation"
+    context: opContext
   });
   diffParameters(ctx, baseLoc, oldItem, oldOp, newItem, newOp);
   diffRequestBody(ctx, baseLoc, oldOp, newOp);
@@ -2894,17 +3188,36 @@ function diffNamedMap(ctx, oldMap, newMap, addedRule, removedRule, baseLoc) {
         ruleId: removedRule,
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method?.toLowerCase() ?? "",
-            "callbacks",
-            name
-          ),
-          pointerNew: ""
+          pointerOld: opPointer(baseLoc, "callbacks", name),
+          pointerNew: "",
+          context: baseLoc.context ?? "operation"
         },
         oldValue: name
       });
+    } else {
+      const oldCb = isObject(oldObj[name]) ? oldObj[name] : {};
+      const newCb = isObject(newObj[name]) ? newObj[name] : {};
+      for (const url of Object.keys(oldCb).sort()) {
+        if (url in newCb) {
+          const oldPathItem = isObject(oldCb[url]) ? oldCb[url] : {};
+          const newPathItem = isObject(newCb[url]) ? newCb[url] : {};
+          const oldMethods = methodKeys(oldPathItem);
+          const newMethods = methodKeys(newPathItem);
+          for (const m of oldMethods.filter((m2) => newMethods.includes(m2))) {
+            const prefix = [
+              ...baseLoc.pointerPrefix ?? (baseLoc.method ? ["paths", baseLoc.path, baseLoc.method.toLowerCase()] : ["paths", baseLoc.path]),
+              "callbacks",
+              name,
+              url,
+              m.toLowerCase()
+            ];
+            diffOperationPair(ctx, baseLoc.path, m, oldPathItem, newPathItem, {
+              pointerPrefix: prefix,
+              context: "callback"
+            });
+          }
+        }
+      }
     }
   }
   for (const name of Object.keys(newObj).sort()) {
@@ -2914,13 +3227,8 @@ function diffNamedMap(ctx, oldMap, newMap, addedRule, removedRule, baseLoc) {
         location: {
           ...baseLoc,
           pointerOld: "",
-          pointerNew: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method?.toLowerCase() ?? "",
-            "callbacks",
-            name
-          )
+          pointerNew: opPointer(baseLoc, "callbacks", name),
+          context: baseLoc.context ?? "operation"
         },
         newValue: name
       });
@@ -2930,152 +3238,79 @@ function diffNamedMap(ctx, oldMap, newMap, addedRule, removedRule, baseLoc) {
 function diffParameters(ctx, baseLoc, oldItem, oldOp, newItem, newOp) {
   const oldParams = mergedParameters(oldItem, oldOp);
   const newParams = mergedParameters(newItem, newOp);
-  const keyOf = (p) => `${typeof p.name === "string" ? p.name : ""}`;
-  const oldByKey = /* @__PURE__ */ new Map();
+  const exactKey = (p) => `${typeof p.name === "string" ? p.name : ""}::${typeof p.in === "string" ? p.in : ""}`;
+  const oldMap = /* @__PURE__ */ new Map();
   for (const p of oldParams) {
-    const k = keyOf(p);
-    if (!oldByKey.has(k)) oldByKey.set(k, p);
+    const k = exactKey(p);
+    if (!oldMap.has(k)) oldMap.set(k, p);
   }
-  const newByKey = /* @__PURE__ */ new Map();
+  const newMap = /* @__PURE__ */ new Map();
   for (const p of newParams) {
-    const k = keyOf(p);
-    if (!newByKey.has(k)) newByKey.set(k, p);
+    const k = exactKey(p);
+    if (!newMap.has(k)) newMap.set(k, p);
   }
-  for (const [key, oldP] of oldByKey) {
-    const name = typeof oldP.name === "string" ? oldP.name : key;
-    const wasIn = typeof oldP.in === "string" ? oldP.in : "";
-    const newP = newByKey.get(key);
-    if (!newP) {
-      const wasRequired = oldP.required === true || wasIn === "path" || wasIn === "header";
-      emit(ctx, {
-        ruleId: "removed-parameter",
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          pointerNew: "",
-          context: wasIn === "header" ? "request-header" : "parameter"
-        },
-        oldValue: name,
-        doctrine: { wasRequired }
-      });
-      continue;
+  const matched = [];
+  const unmatchedOld = /* @__PURE__ */ new Map();
+  const unmatchedNew = /* @__PURE__ */ new Map();
+  for (const [k, oldP] of oldMap) {
+    const newP = newMap.get(k);
+    if (newP) {
+      matched.push([oldP, newP]);
+    } else {
+      unmatchedOld.set(k, oldP);
     }
-    const newIn = typeof newP.in === "string" ? newP.in : "";
-    if (newIn !== wasIn) {
+  }
+  for (const [k, newP] of newMap) {
+    if (!oldMap.has(k)) {
+      unmatchedNew.set(k, newP);
+    }
+  }
+  for (const [oldK, oldP] of Array.from(unmatchedOld.entries())) {
+    const oldName = typeof oldP.name === "string" ? oldP.name : "";
+    const matchingNewEntry = Array.from(unmatchedNew.entries()).find(
+      ([, newP]) => (typeof newP.name === "string" ? newP.name : "") === oldName
+    );
+    if (matchingNewEntry) {
+      const [newK, newP] = matchingNewEntry;
+      unmatchedOld.delete(oldK);
+      unmatchedNew.delete(newK);
+      const wasIn = typeof oldP.in === "string" ? oldP.in : "";
+      const newIn = typeof newP.in === "string" ? newP.in : "";
       emit(ctx, {
         ruleId: "parameter-location-changed",
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          pointerNew: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
+          pointerOld: opPointer(baseLoc, "parameters", oldName),
+          pointerNew: opPointer(baseLoc, "parameters", oldName),
           context: "parameter"
         },
         oldValue: wasIn,
         newValue: newIn
       });
-      continue;
-    }
-    const oldReq = oldP.required === true;
-    const newReq = newP.required === true;
-    if (!oldReq && newReq) {
-      emit(ctx, {
-        ruleId: "parameter-made-required",
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          pointerNew: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          context: "parameter"
-        }
-      });
-    }
-    const oldSchema = isObject(oldP.schema) ? oldP.schema : void 0;
-    const newSchema = isObject(newP.schema) ? newP.schema : void 0;
-    if (oldSchema && newSchema) {
-      diffSchemaNode(
-        ctx,
-        oldSchema,
-        newSchema,
-        pointerJoin(
-          "paths",
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          "parameters",
-          name,
-          "schema"
-        ),
-        pointerJoin(
-          "paths",
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          "parameters",
-          name,
-          "schema"
-        ),
-        { context: "parameter", path: baseLoc.path, method: baseLoc.method },
-        {
-          requiredOld: stringArrayOf2(oldSchema.required),
-          requiredNew: stringArrayOf2(newSchema.required),
-          sideClass: "send"
-        }
-      );
-    }
-    if (!deepEqual(oldP.description, newP.description) || !deepEqual(oldP.example, newP.example) || !deepEqual(oldP.deprecated, newP.deprecated)) {
-      emit(ctx, {
-        ruleId: "parameter-metadata-changed",
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          pointerNew: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "parameters",
-            name
-          ),
-          context: "parameter"
-        }
-      });
+      diffParameterDetails(ctx, baseLoc, oldP, newP);
     }
   }
-  for (const [key, newP] of newByKey) {
-    if (oldByKey.has(key)) continue;
-    const name = typeof newP.name === "string" ? newP.name : key;
+  for (const [, oldP] of unmatchedOld) {
+    const name = typeof oldP.name === "string" ? oldP.name : "";
+    const wasIn = typeof oldP.in === "string" ? oldP.in : "";
+    const wasRequired = oldP.required === true || wasIn === "path" || wasIn === "header";
+    emit(ctx, {
+      ruleId: "removed-parameter",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: "",
+        context: wasIn === "header" ? "request-header" : "parameter"
+      },
+      oldValue: name,
+      doctrine: { wasRequired }
+    });
+  }
+  for (const [oldP, newP] of matched) {
+    diffParameterDetails(ctx, baseLoc, oldP, newP);
+  }
+  for (const [, newP] of unmatchedNew) {
+    const name = typeof newP.name === "string" ? newP.name : "";
     const isIn = typeof newP.in === "string" ? newP.in : "";
     const required = newP.required === true || isIn === "path";
     emit(ctx, {
@@ -3083,30 +3318,84 @@ function diffParameters(ctx, baseLoc, oldItem, oldOp, newItem, newOp) {
       location: {
         ...baseLoc,
         pointerOld: "",
-        pointerNew: pointerJoin(
-          "paths",
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          "parameters",
-          name
-        ),
+        pointerNew: opPointer(baseLoc, "parameters", name),
         context: "parameter"
       },
       newValue: name
     });
   }
 }
+function diffParameterDetails(ctx, baseLoc, oldP, newP) {
+  const name = typeof oldP.name === "string" ? oldP.name : typeof newP.name === "string" ? newP.name : "";
+  const oldReq = oldP.required === true;
+  const newReq = newP.required === true;
+  if (!oldReq && newReq) {
+    emit(ctx, {
+      ruleId: "parameter-made-required",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: opPointer(baseLoc, "parameters", name),
+        context: "parameter"
+      }
+    });
+  }
+  if (!deepEqual(oldP.style, newP.style) || !deepEqual(oldP.explode, newP.explode)) {
+    emit(ctx, {
+      ruleId: "parameter-style-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name, "style"),
+        pointerNew: opPointer(baseLoc, "parameters", name, "style"),
+        context: "parameter"
+      },
+      oldValue: oldP.style ?? (oldP.explode !== void 0 ? `explode:${oldP.explode}` : void 0),
+      newValue: newP.style ?? (newP.explode !== void 0 ? `explode:${newP.explode}` : void 0)
+    });
+  }
+  const oldSchema = isObject(oldP.schema) ? oldP.schema : void 0;
+  const newSchema = isObject(newP.schema) ? newP.schema : void 0;
+  if (oldSchema && newSchema) {
+    const sideClass = baseLoc.context === "webhook" || baseLoc.context === "callback" ? "parse" : "send";
+    diffSchemaNode(
+      ctx,
+      oldSchema,
+      newSchema,
+      opPointer(baseLoc, "parameters", name, "schema"),
+      opPointer(baseLoc, "parameters", name, "schema"),
+      { context: "parameter", path: baseLoc.path, method: baseLoc.method ?? "" },
+      {
+        requiredOld: stringArrayOf2(oldSchema.required),
+        requiredNew: stringArrayOf2(newSchema.required),
+        sideClass
+      }
+    );
+  }
+  if (!deepEqual(oldP.description, newP.description) || !deepEqual(oldP.example, newP.example) || !deepEqual(oldP.deprecated, newP.deprecated)) {
+    emit(ctx, {
+      ruleId: "parameter-metadata-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: opPointer(baseLoc, "parameters", name),
+        context: "parameter"
+      }
+    });
+  }
+}
 function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
   const oldBody = isObject(oldOp.requestBody) ? oldOp.requestBody : void 0;
   const newBody = isObject(newOp.requestBody) ? newOp.requestBody : void 0;
+  const reqContext = baseLoc.context ?? "request-body";
+  const sideClass = baseLoc.context === "webhook" || baseLoc.context === "callback" ? "parse" : "send";
   if (oldBody && !newBody) {
     emit(ctx, {
       ruleId: "request-body-removed",
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin("paths", baseLoc.path, baseLoc.method.toLowerCase(), "requestBody"),
+        pointerOld: opPointer(baseLoc, "requestBody"),
         pointerNew: "",
-        context: "request-body"
+        context: reqContext
       },
       doctrine: { wasRequired: oldBody.required === true }
     });
@@ -3118,8 +3407,8 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
       location: {
         ...baseLoc,
         pointerOld: "",
-        pointerNew: pointerJoin("paths", baseLoc.path, baseLoc.method.toLowerCase(), "requestBody"),
-        context: "request-body"
+        pointerNew: opPointer(baseLoc, "requestBody"),
+        context: reqContext
       }
     });
     return;
@@ -3130,21 +3419,9 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
         ruleId: "request-body-required-changed",
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "requestBody",
-            "required"
-          ),
-          pointerNew: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "requestBody",
-            "required"
-          ),
-          context: "request-body"
+          pointerOld: opPointer(baseLoc, "requestBody", "required"),
+          pointerNew: opPointer(baseLoc, "requestBody", "required"),
+          context: reqContext
         }
       });
     }
@@ -3157,16 +3434,9 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
           location: {
             ...baseLoc,
             mediaType: mt,
-            pointerOld: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "requestBody",
-              "content",
-              mt
-            ),
+            pointerOld: opPointer(baseLoc, "requestBody", "content", mt),
             pointerNew: "",
-            context: "request-body"
+            context: reqContext
           },
           oldValue: mt
         });
@@ -3180,15 +3450,8 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
             ...baseLoc,
             mediaType: mt,
             pointerOld: "",
-            pointerNew: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "requestBody",
-              "content",
-              mt
-            ),
-            context: "request-body"
+            pointerNew: opPointer(baseLoc, "requestBody", "content", mt),
+            context: reqContext
           },
           newValue: mt
         });
@@ -3198,6 +3461,20 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
       if (!(mt in newContent)) continue;
       const oldMt = isObject(oldContent[mt]) ? oldContent[mt] : {};
       const newMt = isObject(newContent[mt]) ? newContent[mt] : {};
+      if (!deepEqual(oldMt.encoding, newMt.encoding) && (oldMt.encoding !== void 0 || newMt.encoding !== void 0)) {
+        emit(ctx, {
+          ruleId: "encoding-changed",
+          location: {
+            ...baseLoc,
+            mediaType: mt,
+            pointerOld: opPointer(baseLoc, "requestBody", "content", mt, "encoding"),
+            pointerNew: opPointer(baseLoc, "requestBody", "content", mt, "encoding"),
+            context: reqContext
+          },
+          oldValue: oldMt.encoding,
+          newValue: newMt.encoding
+        });
+      }
       const oldSchemaRaw = isObject(oldMt.schema) ? oldMt.schema : void 0;
       const newSchemaRaw = isObject(newMt.schema) ? newMt.schema : void 0;
       if (oldSchemaRaw && newSchemaRaw) {
@@ -3207,26 +3484,10 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
           ctx,
           oldSchema,
           newSchema,
-          pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "requestBody",
-            "content",
-            mt,
-            "schema"
-          ),
-          pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "requestBody",
-            "content",
-            mt,
-            "schema"
-          ),
+          opPointer(baseLoc, "requestBody", "content", mt, "schema"),
+          opPointer(baseLoc, "requestBody", "content", mt, "schema"),
           {
-            context: "request-body",
+            context: reqContext,
             path: baseLoc.path,
             method: baseLoc.method,
             mediaType: mt
@@ -3234,7 +3495,7 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
           {
             requiredOld: stringArrayOf2(oldSchema.required),
             requiredNew: stringArrayOf2(newSchema.required),
-            sideClass: "send"
+            sideClass
           }
         );
       }
@@ -3244,6 +3505,7 @@ function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
 function diffResponses(ctx, baseLoc, oldOp, newOp) {
   const oldRes = isObject(oldOp.responses) ? oldOp.responses : {};
   const newRes = isObject(newOp.responses) ? newOp.responses : {};
+  const resContext = baseLoc.context ?? "response-body";
   for (const status of Object.keys(oldRes).sort()) {
     if (!(status in newRes)) {
       emit(ctx, {
@@ -3251,15 +3513,9 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
         location: {
           ...baseLoc,
           statusCode: status,
-          pointerOld: pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "responses",
-            status
-          ),
+          pointerOld: opPointer(baseLoc, "responses", status),
           pointerNew: "",
-          context: "response-body"
+          context: resContext
         },
         oldValue: status
       });
@@ -3276,20 +3532,37 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
           location: {
             ...baseLoc,
             statusCode: status,
-            pointerOld: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "responses",
-              status,
-              "headers",
-              h
-            ),
+            pointerOld: opPointer(baseLoc, "responses", status, "headers", h),
             pointerNew: "",
             context: "response-header"
           },
           oldValue: h
         });
+      } else {
+        const oldH = isObject(oldHeaders[h]) ? oldHeaders[h] : {};
+        const newH = isObject(newHeaders[h]) ? newHeaders[h] : {};
+        const oldHSchema = isObject(oldH.schema) ? oldH.schema : void 0;
+        const newHSchema = isObject(newH.schema) ? newH.schema : void 0;
+        if (oldHSchema && newHSchema) {
+          diffSchemaNode(
+            ctx,
+            oldHSchema,
+            newHSchema,
+            opPointer(baseLoc, "responses", status, "headers", h, "schema"),
+            opPointer(baseLoc, "responses", status, "headers", h, "schema"),
+            {
+              context: "response-header",
+              path: baseLoc.path,
+              method: baseLoc.method,
+              statusCode: status
+            },
+            {
+              requiredOld: stringArrayOf2(oldHSchema.required),
+              requiredNew: stringArrayOf2(newHSchema.required),
+              sideClass: "parse"
+            }
+          );
+        }
       }
     }
     for (const h of Object.keys(newHeaders).sort()) {
@@ -3300,15 +3573,7 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
             ...baseLoc,
             statusCode: status,
             pointerOld: "",
-            pointerNew: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "responses",
-              status,
-              "headers",
-              h
-            ),
+            pointerNew: opPointer(baseLoc, "responses", status, "headers", h),
             context: "response-header"
           },
           newValue: h
@@ -3325,17 +3590,9 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
             ...baseLoc,
             statusCode: status,
             mediaType: mt,
-            pointerOld: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "responses",
-              status,
-              "content",
-              mt
-            ),
+            pointerOld: opPointer(baseLoc, "responses", status, "content", mt),
             pointerNew: "",
-            context: "response-body"
+            context: resContext
           },
           oldValue: mt
         });
@@ -3350,16 +3607,8 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
             statusCode: status,
             mediaType: mt,
             pointerOld: "",
-            pointerNew: pointerJoin(
-              "paths",
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              "responses",
-              status,
-              "content",
-              mt
-            ),
-            context: "response-body"
+            pointerNew: opPointer(baseLoc, "responses", status, "content", mt),
+            context: resContext
           },
           newValue: mt
         });
@@ -3378,28 +3627,10 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
           ctx,
           oldSchema,
           newSchema,
-          pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "responses",
-            status,
-            "content",
-            mt,
-            "schema"
-          ),
-          pointerJoin(
-            "paths",
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            "responses",
-            status,
-            "content",
-            mt,
-            "schema"
-          ),
+          opPointer(baseLoc, "responses", status, "content", mt, "schema"),
+          opPointer(baseLoc, "responses", status, "content", mt, "schema"),
           {
-            context: "response-body",
+            context: resContext,
             path: baseLoc.path,
             method: baseLoc.method,
             statusCode: status,
@@ -3422,14 +3653,8 @@ function diffResponses(ctx, baseLoc, oldOp, newOp) {
         ...baseLoc,
         statusCode: status,
         pointerOld: "",
-        pointerNew: pointerJoin(
-          "paths",
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          "responses",
-          status
-        ),
-        context: "response-body"
+        pointerNew: opPointer(baseLoc, "responses", status),
+        context: resContext
       },
       newValue: status
     });
@@ -3448,6 +3673,17 @@ function diffWebhooks(ctx) {
         },
         oldValue: name
       });
+    } else {
+      const oldItem = ctx.baselineIndex.webhooks.get(name);
+      const newItem = ctx.currentIndex.webhooks.get(name);
+      const oldMethods = methodKeys(oldItem);
+      const newMethods = methodKeys(newItem);
+      for (const m of oldMethods.filter((m2) => newMethods.includes(m2))) {
+        diffOperationPair(ctx, name, m, oldItem, newItem, {
+          pointerPrefix: ["webhooks", name, m.toLowerCase()],
+          context: "webhook"
+        });
+      }
     }
   }
   for (const name of ctx.currentIndex.webhooks.keys()) {
@@ -3707,7 +3943,9 @@ function diffSecurity(ctx) {
       });
       continue;
     }
-    if (!deepEqual(oldScheme.type, newScheme.type)) {
+    const oldType = Array.isArray(oldScheme.type) ? oldScheme.type[0] : oldScheme.type;
+    const newType = Array.isArray(newScheme.type) ? newScheme.type[0] : newScheme.type;
+    if (!deepEqual(oldType, newType)) {
       emit(ctx, {
         ruleId: "security-type-changed",
         location: {
@@ -3716,21 +3954,62 @@ function diffSecurity(ctx) {
           pointerOld: pointerJoin("components", "securitySchemes", name, "type"),
           pointerNew: pointerJoin("components", "securitySchemes", name, "type")
         },
-        oldValue: oldScheme.type,
-        newValue: newScheme.type
+        oldValue: oldType,
+        newValue: newType
       });
     }
-    if (oldScheme.type === "apiKey" && newScheme.type === "apiKey" && !deepEqual(oldScheme.in, newScheme.in)) {
+    if (oldType === "apiKey" && newType === "apiKey") {
+      if (!deepEqual(oldScheme.in, newScheme.in)) {
+        emit(ctx, {
+          ruleId: "api-key-location-changed",
+          location: {
+            context: "security",
+            path: "/",
+            pointerOld: pointerJoin("components", "securitySchemes", name, "in"),
+            pointerNew: pointerJoin("components", "securitySchemes", name, "in")
+          },
+          oldValue: oldScheme.in,
+          newValue: newScheme.in
+        });
+      }
+      if (!deepEqual(oldScheme.name, newScheme.name)) {
+        emit(ctx, {
+          ruleId: "api-key-location-changed",
+          location: {
+            context: "security",
+            path: "/",
+            pointerOld: pointerJoin("components", "securitySchemes", name, "name"),
+            pointerNew: pointerJoin("components", "securitySchemes", name, "name")
+          },
+          oldValue: oldScheme.name,
+          newValue: newScheme.name
+        });
+      }
+    }
+    if (oldType === "http" && newType === "http" && !deepEqual(oldScheme.scheme, newScheme.scheme)) {
       emit(ctx, {
-        ruleId: "api-key-location-changed",
+        ruleId: "security-type-changed",
         location: {
           context: "security",
           path: "/",
-          pointerOld: pointerJoin("components", "securitySchemes", name, "in"),
-          pointerNew: pointerJoin("components", "securitySchemes", name, "in")
+          pointerOld: pointerJoin("components", "securitySchemes", name, "scheme"),
+          pointerNew: pointerJoin("components", "securitySchemes", name, "scheme")
         },
-        oldValue: oldScheme.in,
-        newValue: newScheme.in
+        oldValue: oldScheme.scheme,
+        newValue: newScheme.scheme
+      });
+    }
+    if (oldType === "openIdConnect" && newType === "openIdConnect" && !deepEqual(oldScheme.openIdConnectUrl, newScheme.openIdConnectUrl)) {
+      emit(ctx, {
+        ruleId: "security-type-changed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin("components", "securitySchemes", name, "openIdConnectUrl"),
+          pointerNew: pointerJoin("components", "securitySchemes", name, "openIdConnectUrl")
+        },
+        oldValue: oldScheme.openIdConnectUrl,
+        newValue: newScheme.openIdConnectUrl
       });
     }
     diffOauthScopes(ctx, name, oldScheme, newScheme, referencedOld, referencedNew);
@@ -3860,7 +4139,7 @@ function diffSecurityRequirements(ctx, oldDoc, newDoc, oldGlobal, newGlobal, old
 function safeArray(v) {
   return Array.isArray(v) ? v : [];
 }
-function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
+function compareSecurity(ctx, path5, method, oldReqs, newReqs) {
   const oldEmpty = oldReqs.length === 0 || oldReqs.every(isNoSecurity);
   const newEmpty = newReqs.length === 0 || newReqs.every(isNoSecurity);
   if (!oldEmpty && newEmpty) {
@@ -3868,10 +4147,10 @@ function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
       ruleId: "security-requirement-removed",
       location: {
         context: "security",
-        path: path4,
+        path: path5,
         method,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+        pointerOld: pointerJoin("paths", path5, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path5, method.toLowerCase(), "security")
       }
     });
     return;
@@ -3881,10 +4160,10 @@ function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
       ruleId: "security-requirement-added",
       location: {
         context: "security",
-        path: path4,
+        path: path5,
         method,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+        pointerOld: pointerJoin("paths", path5, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path5, method.toLowerCase(), "security")
       }
     });
     return;
@@ -3896,10 +4175,10 @@ function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
       ruleId: "security-requirement-changed",
       location: {
         context: "security",
-        path: path4,
+        path: path5,
         method,
-        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
-        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+        pointerOld: pointerJoin("paths", path5, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path5, method.toLowerCase(), "security")
       },
       oldValue: compact2(oldReqs),
       newValue: compact2(newReqs)
@@ -3919,10 +4198,10 @@ function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
                 ruleId: "security-scope-required-removed",
                 location: {
                   context: "security",
-                  path: path4,
+                  path: path5,
                   method,
-                  pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
-                  pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+                  pointerOld: pointerJoin("paths", path5, method.toLowerCase(), "security"),
+                  pointerNew: pointerJoin("paths", path5, method.toLowerCase(), "security")
                 },
                 oldValue: s
               });
@@ -3934,10 +4213,10 @@ function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
                 ruleId: "security-scope-required-added",
                 location: {
                   context: "security",
-                  path: path4,
+                  path: path5,
                   method,
-                  pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
-                  pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+                  pointerOld: pointerJoin("paths", path5, method.toLowerCase(), "security"),
+                  pointerNew: pointerJoin("paths", path5, method.toLowerCase(), "security")
                 },
                 newValue: s
               });
@@ -4037,7 +4316,7 @@ function isIgnored(change, config) {
   if (ignore.changes.length > 0) {
     if (import_micromatch.default.isMatch(change.ruleId, ignore.changes, { nocase: false })) return true;
   }
-  const path4 = changePath(change);
+  const path5 = changePath(change);
   if (ignore.schemas.length > 0) {
     const name = change.location.componentName;
     if (name && import_micromatch.default.isMatch(name, ignore.schemas)) return true;
@@ -4059,11 +4338,11 @@ function isIgnored(change, config) {
     }
   }
   if (ignore.operations.length > 0 && change.location.method !== void 0) {
-    const opKey = `${change.location.method.toUpperCase()} ${path4}`;
+    const opKey = `${change.location.method.toUpperCase()} ${path5}`;
     if (ignore.operations.includes(opKey)) return true;
   }
-  if (ignore.paths.length > 0 && path4 && path4 !== "") {
-    if (import_micromatch.default.isMatch(path4, ignore.paths)) return true;
+  if (ignore.paths.length > 0 && path5 && path5 !== "") {
+    if (import_micromatch.default.isMatch(path5, ignore.paths)) return true;
   }
   return false;
 }
@@ -4246,7 +4525,7 @@ function renderTerminal(report, options) {
   return lines;
 }
 function suggestLine(report) {
-  const bump = report.semver.bump;
+  const bump = report.semver?.bump ?? "none";
   if (bump === "none") return null;
   const label = bump === "major" ? "MAJOR" : bump === "minor" ? "MINOR" : "PATCH";
   return `Suggested version bump: ${label}`;
@@ -4699,7 +4978,7 @@ function renderHtml(report) {
     </section>
 
     <div class="semver-banner">
-      <strong>Suggested Version Bump:</strong> ${esc(report.semver.bump.toUpperCase())} &mdash; ${esc(report.semver.reason)}
+      <strong>Suggested Version Bump:</strong> ${esc(report.semver?.bump ? report.semver.bump.toUpperCase() : "NONE")} &mdash; ${esc(report.semver?.reason ?? "No bump suggested")}
     </div>
 
     <section class="controls-bar">
@@ -4780,6 +5059,7 @@ function renderHtml(report) {
 }
 
 // src/reporters/sarif.ts
+var import_node_path3 = __toESM(require("path"), 1);
 function sarifLevel(severity) {
   switch (severity) {
     case "error":
@@ -4810,7 +5090,12 @@ Suggestion: ${r.suggestion({ location: { path: "/", pointerOld: "", pointerNew: 
     }
   }));
   const results = report.changes.map((c) => {
-    const fileUri = (c.location.file || report.current.source).replace(/\\/g, "/");
+    const rawPath = c.location.file || report.current.source;
+    const rel = import_node_path3.default.isAbsolute(rawPath) ? import_node_path3.default.relative(process.cwd(), rawPath) : rawPath;
+    let fileUri = rel.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+    if (!fileUri || fileUri === ".") {
+      fileUri = import_node_path3.default.basename(report.current.source) || "openapi.yaml";
+    }
     const line = c.location.line && c.location.line > 0 ? c.location.line : 1;
     const col = c.location.column && c.location.column > 0 ? c.location.column : 1;
     return {
@@ -4868,16 +5153,17 @@ function resolveFormat(opts) {
   if (opts.markdown) return "markdown";
   if (opts.html) return "html";
   if (opts.sarif) return "sarif";
+  if (opts.junit) return "junit";
   if (opts.format !== void 0) {
-    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown" || opts.format === "html" || opts.format === "sarif") {
+    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown" || opts.format === "html" || opts.format === "sarif" || opts.format === "junit") {
       return opts.format;
     }
     throw new CliUsageError(
-      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif)`
+      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif|junit)`
     );
   }
   const envFormat = process.env.APIGUARD_FORMAT;
-  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal" || envFormat === "html" || envFormat === "sarif")
+  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal" || envFormat === "html" || envFormat === "sarif" || envFormat === "junit")
     return envFormat;
   return "terminal";
 }
@@ -4915,7 +5201,8 @@ async function runDiff(oldSpec, newSpec, opts, io) {
     includeNonBreaking: opts.strict || opts.includeNonBreaking,
     suggestVersion: opts.suggestVersion,
     noColor: !colorEnabled(opts, loaded.config.output.color),
-    profile: opts.profile
+    profile: opts.profile,
+    allowExternalFiles: opts.allowExternalFiles
   });
   const { report } = await analyze(oldSpec, newSpec, {
     config,
@@ -4934,6 +5221,9 @@ async function runDiff(oldSpec, newSpec, opts, io) {
     body = renderHtml(report);
   } else if (config.output.format === "sarif") {
     body = renderSarif(report);
+  } else if (config.output.format === "junit") {
+    const { renderJunit: renderJunit2 } = await Promise.resolve().then(() => (init_junit(), junit_exports));
+    body = renderJunit2(report);
   } else {
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,
@@ -4988,7 +5278,7 @@ async function runValidate(spec, opts, io) {
 
 // src/cli/init-command.ts
 var import_node_fs4 = __toESM(require("fs"), 1);
-var import_node_path3 = __toESM(require("path"), 1);
+var import_node_path4 = __toESM(require("path"), 1);
 
 // src/core/config/template.ts
 var CONFIG_TEMPLATE = `# API Guard configuration
@@ -5086,15 +5376,15 @@ paths:
 function filesFor(_dir, withExamples) {
   const files = [{ relPath: "apiguard.yaml", content: CONFIG_TEMPLATE }];
   if (withExamples) {
-    files.push({ relPath: import_node_path3.default.join("examples", "baseline.yaml"), content: EXAMPLE_BASELINE });
-    files.push({ relPath: import_node_path3.default.join("examples", "current.yaml"), content: EXAMPLE_CURRENT });
+    files.push({ relPath: import_node_path4.default.join("examples", "baseline.yaml"), content: EXAMPLE_BASELINE });
+    files.push({ relPath: import_node_path4.default.join("examples", "current.yaml"), content: EXAMPLE_CURRENT });
   }
   return files;
 }
 async function runInit(dir, opts, io) {
-  const target = import_node_path3.default.resolve(dir);
+  const target = import_node_path4.default.resolve(dir);
   const planned = filesFor(target, opts.examples === true);
-  const conflicts = planned.filter((f) => import_node_fs4.default.existsSync(import_node_path3.default.join(target, f.relPath)));
+  const conflicts = planned.filter((f) => import_node_fs4.default.existsSync(import_node_path4.default.join(target, f.relPath)));
   if (conflicts.length > 0 && !opts.force) {
     const lines = conflicts.map(
       (f) => `  would write ${f.relPath} (${f.content.split("\n").length} lines)`
@@ -5106,8 +5396,8 @@ use --force to overwrite`
     );
   }
   for (const f of planned) {
-    const abs = import_node_path3.default.join(target, f.relPath);
-    import_node_fs4.default.mkdirSync(import_node_path3.default.dirname(abs), { recursive: true });
+    const abs = import_node_path4.default.join(target, f.relPath);
+    import_node_fs4.default.mkdirSync(import_node_path4.default.dirname(abs), { recursive: true });
     import_node_fs4.default.writeFileSync(abs, f.content, "utf8");
     io.stdout(`wrote ${f.relPath}`);
   }
@@ -5127,7 +5417,8 @@ function endpointOf3(change) {
 }
 function renderChangelog(report) {
   const lines = [];
-  const version = report.semver.bump === "none" ? "Current Release (No version bump)" : `Next Release (Recommended bump: ${report.semver.bump.toUpperCase()})`;
+  const bump = report.semver?.bump ?? "none";
+  const version = bump === "none" ? "Current Release (No version bump)" : `Next Release (Recommended bump: ${bump.toUpperCase()})`;
   lines.push(`## ${version}`);
   lines.push("");
   const breaking = report.changes.filter((c) => c.severity === "error");
@@ -5212,15 +5503,16 @@ function generateExpressShim(report) {
   const pathRewrites = [];
   const paramDefaults = [];
   for (const c of breaking) {
-    if (c.ruleId === "operation-removed" && c.location.path) {
-      pathRewrites.push({ oldPath: c.location.path });
+    if ((c.ruleId === "removed-path" || c.ruleId === "removed-method" || c.ruleId === "operation-removed") && c.location.path) {
+      pathRewrites.push({ oldPath: c.location.path, method: c.location.method });
     } else if (c.ruleId === "parameter-added-required" || c.ruleId === "parameter-made-required") {
       const paramName = c.location.pointerNew.split("/").pop() || "param";
+      const defaultVal = c.newValue !== void 0 && c.newValue !== paramName ? c.newValue : "default";
       paramDefaults.push({
         method: c.location.method,
         path: c.location.path,
         param: paramName,
-        defaultVal: c.newValue ?? ""
+        defaultVal
       });
     }
   }
@@ -5232,14 +5524,23 @@ export function apiGuardCompatibilityShim(req: Request, res: Response, next: Nex
   const method = req.method.toUpperCase();
   const path = req.path;
 
-  // 1. Parameter defaults for newly required parameters
-${paramDefaults.map(
-    (p) => `  if (${p.method ? `method === '${p.method}' && ` : ""}path.startsWith('${p.path.replace(/\{.*\}/, "")}')) {
-    if (req.query['${p.param}'] === undefined && req.body?.['${p.param}'] === undefined) {
-      req.query['${p.param}'] = '${String(p.defaultVal)}';
-    }
+  // 0. Removed paths and methods
+${pathRewrites.map(
+    (p) => `  if (${p.method ? `method === '${p.method}' && ` : ""}path === '${p.oldPath}') {
+    res.status(410).json({ error: 'Endpoint has been removed in newer API version' });
+    return;
   }`
   ).join("\n")}
+
+  // 1. Parameter defaults for newly required parameters
+${paramDefaults.map((p) => {
+    const basePrefix = p.path.split("{")[0];
+    return `  if (${p.method ? `method === '${p.method}' && ` : ""}(path === '${p.path}' || path.startsWith('${basePrefix}'))) {
+    if (req.query['${p.param}'] === undefined && (!req.body || req.body['${p.param}'] === undefined)) {
+      req.query['${p.param}'] = '${String(p.defaultVal)}';
+    }
+  }`;
+  }).join("\n")}
 
   // 2. Response adapter interception
   const originalJson = res.json;
@@ -5257,6 +5558,22 @@ ${paramDefaults.map(
 }
 function generateCloudflareWorkerShim(report) {
   const breaking = report.changes.filter((c) => c.severity === "error");
+  const pathRewrites = breaking.filter(
+    (c) => (c.ruleId === "removed-path" || c.ruleId === "removed-method" || c.ruleId === "operation-removed") && c.location.path
+  );
+  const paramDefaults = [];
+  for (const c of breaking) {
+    if (c.ruleId === "parameter-added-required" || c.ruleId === "parameter-made-required") {
+      const paramName = c.location.pointerNew.split("/").pop() || "param";
+      const defaultVal = c.newValue !== void 0 && c.newValue !== paramName ? c.newValue : "default";
+      paramDefaults.push({
+        method: c.location.method,
+        path: c.location.path,
+        param: paramName,
+        defaultVal
+      });
+    }
+  }
   return `// Generated by API Guard (apiguard codegen-shim --target cloudflare-worker)
 // Edge backward-compatibility worker
 export default {
@@ -5264,8 +5581,28 @@ export default {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
 
+    // 0. Intercept removed paths
+${pathRewrites.map(
+    (c) => `    if (${c.location.method ? `method === '${c.location.method}' && ` : ""}url.pathname === '${c.location.path}') {
+      return new Response(JSON.stringify({ error: 'Endpoint removed' }), { status: 410, headers: { 'content-type': 'application/json' } });
+    }`
+  ).join("\n")}
+
     // Clone request headers for mutation
     const modifiedHeaders = new Headers(request.headers);
+
+    // 1. Parameter defaults for newly required parameters
+${paramDefaults.map((p) => {
+    const basePrefix = p.path.split("{")[0];
+    return `    if (${p.method ? `method === '${p.method}' && ` : ""}(url.pathname === '${p.path}' || url.pathname.startsWith('${basePrefix}'))) {
+      if (!url.searchParams.has('${p.param}')) {
+        url.searchParams.set('${p.param}', '${String(p.defaultVal)}');
+      }
+      if (!modifiedHeaders.has('${p.param}')) {
+        modifiedHeaders.set('${p.param}', '${String(p.defaultVal)}');
+      }
+    }`;
+  }).join("\n")}
 
     // Track downstream upstream response
     const response = await fetch(new Request(url.toString(), {
@@ -5380,13 +5717,15 @@ function buildProgram(io) {
   program.exitOverride();
   program.configureOutput({
     writeOut: (s) => io.stdout(s.trimEnd()),
-    writeErr: (s) => io.stderr(s.trimEnd())
+    writeErr: () => {
+    }
+    // Commander usage errors are formatted and rendered once via renderError in run()
   });
   program.name("apiguard").version(TOOL_VERSION).description("Detect breaking changes between OpenAPI specifications");
-  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option(
+  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option(
     "--format <f>",
-    "terminal|json|markdown|html|sarif (aliases: --json, --markdown, --html, --sarif)"
-  ).option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--html", "shorthand for --format html").option("--sarif", "shorthand for --format sarif").option("--open", "open interactive HTML report in browser").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--profile <p>", "client persona profile (default|strict-sdk|loose-web)").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
+    "terminal|json|markdown|html|sarif|junit (aliases: --json, --markdown, --html, --sarif, --junit)"
+  ).option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--html", "shorthand for --format html").option("--sarif", "shorthand for --format sarif").option("--junit", "shorthand for --format junit").option("--allow-external-files", "allow $ref to files outside spec directory").option("--open", "open interactive HTML report in browser").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--profile <p>", "client persona profile (default|strict-sdk|loose-web)").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
     const code = await runDiff(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
@@ -5394,14 +5733,14 @@ function buildProgram(io) {
     }
   });
   void diff;
-  program.command("changelog").description("Generate a Keep-a-Changelog formatted release summary from spec diff").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--config <path>", "explicit config file").option("--output <path>", "write changelog to file").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--json", "output changelog as JSON").action(async (oldSpec, newSpec, opts) => {
+  program.command("changelog").description("Generate a Keep-a-Changelog formatted release summary from spec diff").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option("--config <path>", "explicit config file").option("--output <path>", "write changelog to file").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--json", "output changelog as JSON").action(async (oldSpec, newSpec, opts) => {
     const code = await runChangelog(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
       program.__apiguardExitCode = code;
     }
   });
-  program.command("codegen-shim").description("Generate backward-compatibility gateway adapter for breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--target <t>", "express|cloudflare-worker|envoy-lua", "express").option("--config <path>", "explicit config file").option("--output <path>", "write generated shim code to file").option("--git-base <ref>", "resolve baseline against git branch or commit").action(async (oldSpec, newSpec, opts) => {
+  program.command("codegen-shim").description("Generate backward-compatibility gateway adapter for breaking changes").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option("--target <t>", "express|cloudflare-worker|envoy-lua", "express").option("--config <path>", "explicit config file").option("--output <path>", "write generated shim code to file").option("--git-base <ref>", "resolve baseline against git branch or commit").action(async (oldSpec, newSpec, opts) => {
     const code = await runCodegenShim(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
@@ -5426,7 +5765,8 @@ async function run(io = defaultIo) {
     const code = program.__apiguardExitCode;
     return code ?? ExitCode.Ok;
   } catch (err) {
-    io.stderr(renderError(err, io.env.APIGUARD_VERBOSE === "1"));
+    const rendered = renderError(err, io.env.APIGUARD_VERBOSE === "1");
+    if (rendered) io.stderr(rendered);
     return exitCodeFor(err);
   }
 }

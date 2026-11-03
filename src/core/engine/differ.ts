@@ -330,12 +330,29 @@ function methodKeys(item: JsonObject): string[] {
     .sort();
 }
 
+interface BaseOpLoc {
+  path: string;
+  method?: string;
+  pointerPrefix?: string[];
+  context?: Context;
+}
+
+function opPointer(baseLoc: BaseOpLoc, ...sub: string[]): string {
+  const prefix =
+    baseLoc.pointerPrefix ??
+    (baseLoc.method
+      ? ['paths', baseLoc.path, baseLoc.method.toLowerCase()]
+      : ['paths', baseLoc.path]);
+  return pointerJoin(...prefix, ...sub);
+}
+
 function diffOperationPair(
   ctx: DiffContext,
   path: string,
   method: string,
   oldItem: JsonObject,
   newItem: JsonObject,
+  overrides?: { pointerPrefix?: string[]; context?: Context },
 ): void {
   const oldOp = isObject(oldItem[method.toLowerCase()])
     ? (oldItem[method.toLowerCase()] as JsonObject)
@@ -343,7 +360,13 @@ function diffOperationPair(
   const newOp = isObject(newItem[method.toLowerCase()])
     ? (newItem[method.toLowerCase()] as JsonObject)
     : {};
-  const baseLoc = { path, method };
+  const baseLoc: BaseOpLoc = {
+    path,
+    method,
+    pointerPrefix: overrides?.pointerPrefix,
+    context: overrides?.context,
+  };
+  const opContext: Context = baseLoc.context ?? 'operation';
 
   // operationId
   if (!deepEqual(oldOp.operationId, newOp.operationId)) {
@@ -352,9 +375,9 @@ function diffOperationPair(
       location: {
         ...baseLoc,
         operationId: typeof newOp.operationId === 'string' ? newOp.operationId : undefined,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'operationId'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'operationId'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'operationId'),
+        pointerNew: opPointer(baseLoc, 'operationId'),
+        context: opContext,
       },
       oldValue: oldOp.operationId,
       newValue: newOp.operationId,
@@ -369,9 +392,9 @@ function diffOperationPair(
       ruleId: 'operation-deprecated-added',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'deprecated'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'deprecated'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'deprecated'),
+        pointerNew: opPointer(baseLoc, 'deprecated'),
+        context: opContext,
       },
     });
   } else if (oldDep && !newDep) {
@@ -379,9 +402,9 @@ function diffOperationPair(
       ruleId: 'operation-deprecated-removed',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'deprecated'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'deprecated'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'deprecated'),
+        pointerNew: opPointer(baseLoc, 'deprecated'),
+        context: opContext,
       },
     });
   }
@@ -392,9 +415,9 @@ function diffOperationPair(
       ruleId: 'operation-tags-changed',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'tags'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'tags'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'tags'),
+        pointerNew: opPointer(baseLoc, 'tags'),
+        context: opContext,
       },
       oldValue: compact(oldOp.tags),
       newValue: compact(newOp.tags),
@@ -407,9 +430,9 @@ function diffOperationPair(
       ruleId: 'operation-summary-changed',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'summary'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'summary'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'summary'),
+        pointerNew: opPointer(baseLoc, 'summary'),
+        context: opContext,
       },
       oldValue: oldOp.summary,
       newValue: newOp.summary,
@@ -420,9 +443,9 @@ function diffOperationPair(
       ruleId: 'operation-description-changed',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', path, method.toLowerCase(), 'description'),
-        pointerNew: pointerJoin('paths', path, method.toLowerCase(), 'description'),
-        context: 'operation',
+        pointerOld: opPointer(baseLoc, 'description'),
+        pointerNew: opPointer(baseLoc, 'description'),
+        context: opContext,
       },
       oldValue: oldOp.description,
       newValue: newOp.description,
@@ -432,7 +455,7 @@ function diffOperationPair(
   // callbacks (both 3.0 and 3.1; 3.1 webhooks handled separately)
   diffNamedMap(ctx, oldOp.callbacks, newOp.callbacks, 'callback-added', 'callback-removed', {
     ...baseLoc,
-    context: 'operation',
+    context: opContext,
   });
 
   // parameters (merged path+op level per §11.8)
@@ -451,7 +474,7 @@ function diffNamedMap(
   newMap: unknown,
   addedRule: string,
   removedRule: string,
-  baseLoc: { path: string; method?: string; context: Context },
+  baseLoc: BaseOpLoc,
 ): void {
   const oldObj = isObject(oldMap) ? oldMap : {};
   const newObj = isObject(newMap) ? newMap : {};
@@ -461,17 +484,39 @@ function diffNamedMap(
         ruleId: removedRule,
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method?.toLowerCase() ?? '',
-            'callbacks',
-            name,
-          ),
+          pointerOld: opPointer(baseLoc, 'callbacks', name),
           pointerNew: '',
+          context: baseLoc.context ?? 'operation',
         },
         oldValue: name,
       });
+    } else {
+      const oldCb = isObject(oldObj[name]) ? oldObj[name] : {};
+      const newCb = isObject(newObj[name]) ? newObj[name] : {};
+      for (const url of Object.keys(oldCb).sort()) {
+        if (url in newCb) {
+          const oldPathItem = isObject(oldCb[url]) ? oldCb[url] : {};
+          const newPathItem = isObject(newCb[url]) ? newCb[url] : {};
+          const oldMethods = methodKeys(oldPathItem);
+          const newMethods = methodKeys(newPathItem);
+          for (const m of oldMethods.filter((m) => newMethods.includes(m))) {
+            const prefix = [
+              ...(baseLoc.pointerPrefix ??
+                (baseLoc.method
+                  ? ['paths', baseLoc.path, baseLoc.method.toLowerCase()]
+                  : ['paths', baseLoc.path])),
+              'callbacks',
+              name,
+              url,
+              m.toLowerCase(),
+            ];
+            diffOperationPair(ctx, baseLoc.path, m, oldPathItem, newPathItem, {
+              pointerPrefix: prefix,
+              context: 'callback',
+            });
+          }
+        }
+      }
     }
   }
   for (const name of Object.keys(newObj).sort()) {
@@ -481,13 +526,8 @@ function diffNamedMap(
         location: {
           ...baseLoc,
           pointerOld: '',
-          pointerNew: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method?.toLowerCase() ?? '',
-            'callbacks',
-            name,
-          ),
+          pointerNew: opPointer(baseLoc, 'callbacks', name),
+          context: baseLoc.context ?? 'operation',
         },
         newValue: name,
       });
@@ -497,7 +537,7 @@ function diffNamedMap(
 
 function diffParameters(
   ctx: DiffContext,
-  baseLoc: { path: string; method: string },
+  baseLoc: BaseOpLoc,
   oldItem: JsonObject,
   oldOp: JsonObject,
   newItem: JsonObject,
@@ -505,162 +545,92 @@ function diffParameters(
 ): void {
   const oldParams = mergedParameters(oldItem, oldOp);
   const newParams = mergedParameters(newItem, newOp);
-  // Match by name only: a parameter that moved between in: query/header/path/cookie must
-  // surface as parameter-location-changed (§10.3), not removal+addition.
-  const keyOf = (p: JsonObject) => `${typeof p.name === 'string' ? p.name : ''}`;
 
-  const oldByKey = new Map<string, JsonObject>();
+  const exactKey = (p: JsonObject) =>
+    `${typeof p.name === 'string' ? p.name : ''}::${typeof p.in === 'string' ? p.in : ''}`;
+
+  const oldMap = new Map<string, JsonObject>();
   for (const p of oldParams) {
-    const k = keyOf(p);
-    if (!oldByKey.has(k)) oldByKey.set(k, p);
+    const k = exactKey(p);
+    if (!oldMap.has(k)) oldMap.set(k, p);
   }
-  const newByKey = new Map<string, JsonObject>();
+  const newMap = new Map<string, JsonObject>();
   for (const p of newParams) {
-    const k = keyOf(p);
-    if (!newByKey.has(k)) newByKey.set(k, p);
+    const k = exactKey(p);
+    if (!newMap.has(k)) newMap.set(k, p);
   }
 
-  for (const [key, oldP] of oldByKey) {
-    const name = typeof oldP.name === 'string' ? oldP.name : key;
-    const wasIn = typeof oldP.in === 'string' ? oldP.in : '';
-    const newP = newByKey.get(key);
-    if (!newP) {
-      const wasRequired = oldP.required === true || wasIn === 'path' || wasIn === 'header';
-      emit(ctx, {
-        ruleId: 'removed-parameter',
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          pointerNew: '',
-          context: wasIn === 'header' ? 'request-header' : 'parameter',
-        },
-        oldValue: name,
-        doctrine: { wasRequired },
-      });
-      continue;
+  const matched: Array<[JsonObject, JsonObject]> = [];
+  const unmatchedOld = new Map<string, JsonObject>();
+  const unmatchedNew = new Map<string, JsonObject>();
+
+  for (const [k, oldP] of oldMap) {
+    const newP = newMap.get(k);
+    if (newP) {
+      matched.push([oldP, newP]);
+    } else {
+      unmatchedOld.set(k, oldP);
     }
-    const newIn = typeof newP.in === 'string' ? newP.in : '';
-    if (newIn !== wasIn) {
+  }
+  for (const [k, newP] of newMap) {
+    if (!oldMap.has(k)) {
+      unmatchedNew.set(k, newP);
+    }
+  }
+
+  // Match remaining unmatched by name (parameter-location-changed)
+  for (const [oldK, oldP] of Array.from(unmatchedOld.entries())) {
+    const oldName = typeof oldP.name === 'string' ? oldP.name : '';
+    const matchingNewEntry = Array.from(unmatchedNew.entries()).find(
+      ([, newP]) => (typeof newP.name === 'string' ? newP.name : '') === oldName,
+    );
+    if (matchingNewEntry) {
+      const [newK, newP] = matchingNewEntry;
+      unmatchedOld.delete(oldK);
+      unmatchedNew.delete(newK);
+      const wasIn = typeof oldP.in === 'string' ? oldP.in : '';
+      const newIn = typeof newP.in === 'string' ? newP.in : '';
       emit(ctx, {
         ruleId: 'parameter-location-changed',
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          pointerNew: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
+          pointerOld: opPointer(baseLoc, 'parameters', oldName),
+          pointerNew: opPointer(baseLoc, 'parameters', oldName),
           context: 'parameter',
         },
         oldValue: wasIn,
         newValue: newIn,
       });
-      continue;
-    }
-    const oldReq = oldP.required === true;
-    const newReq = newP.required === true;
-    if (!oldReq && newReq) {
-      emit(ctx, {
-        ruleId: 'parameter-made-required',
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          pointerNew: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          context: 'parameter',
-        },
-      });
-    }
-    // full schema differ over the parameter's inline schema (§10.3/§10.4)
-    const oldSchema = isObject(oldP.schema) ? oldP.schema : undefined;
-    const newSchema = isObject(newP.schema) ? newP.schema : undefined;
-    if (oldSchema && newSchema) {
-      diffSchemaNode(
-        ctx,
-        oldSchema,
-        newSchema,
-        pointerJoin(
-          'paths',
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          'parameters',
-          name,
-          'schema',
-        ),
-        pointerJoin(
-          'paths',
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          'parameters',
-          name,
-          'schema',
-        ),
-        { context: 'parameter', path: baseLoc.path, method: baseLoc.method },
-        {
-          requiredOld: stringArrayOf(oldSchema.required),
-          requiredNew: stringArrayOf(newSchema.required),
-          sideClass: 'send',
-        },
-      );
-    }
-    if (
-      !deepEqual(oldP.description, newP.description) ||
-      !deepEqual(oldP.example, newP.example) ||
-      !deepEqual(oldP.deprecated, newP.deprecated)
-    ) {
-      emit(ctx, {
-        ruleId: 'parameter-metadata-changed',
-        location: {
-          ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          pointerNew: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'parameters',
-            name,
-          ),
-          context: 'parameter',
-        },
-      });
+      diffParameterDetails(ctx, baseLoc, oldP, newP);
     }
   }
 
-  for (const [key, newP] of newByKey) {
-    if (oldByKey.has(key)) continue;
-    const name = typeof newP.name === 'string' ? newP.name : key;
+  // Unmatched old: removed
+  for (const [, oldP] of unmatchedOld) {
+    const name = typeof oldP.name === 'string' ? oldP.name : '';
+    const wasIn = typeof oldP.in === 'string' ? oldP.in : '';
+    const wasRequired = oldP.required === true || wasIn === 'path' || wasIn === 'header';
+    emit(ctx, {
+      ruleId: 'removed-parameter',
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, 'parameters', name),
+        pointerNew: '',
+        context: wasIn === 'header' ? 'request-header' : 'parameter',
+      },
+      oldValue: name,
+      doctrine: { wasRequired },
+    });
+  }
+
+  // Matched: diff details
+  for (const [oldP, newP] of matched) {
+    diffParameterDetails(ctx, baseLoc, oldP, newP);
+  }
+
+  // Unmatched new: added
+  for (const [, newP] of unmatchedNew) {
+    const name = typeof newP.name === 'string' ? newP.name : '';
     const isIn = typeof newP.in === 'string' ? newP.in : '';
     const required = newP.required === true || isIn === 'path';
     emit(ctx, {
@@ -668,13 +638,7 @@ function diffParameters(
       location: {
         ...baseLoc,
         pointerOld: '',
-        pointerNew: pointerJoin(
-          'paths',
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          'parameters',
-          name,
-        ),
+        pointerNew: opPointer(baseLoc, 'parameters', name),
         context: 'parameter',
       },
       newValue: name,
@@ -682,23 +646,100 @@ function diffParameters(
   }
 }
 
+function diffParameterDetails(
+  ctx: DiffContext,
+  baseLoc: BaseOpLoc,
+  oldP: JsonObject,
+  newP: JsonObject,
+): void {
+  const name =
+    typeof oldP.name === 'string' ? oldP.name : typeof newP.name === 'string' ? newP.name : '';
+  const oldReq = oldP.required === true;
+  const newReq = newP.required === true;
+  if (!oldReq && newReq) {
+    emit(ctx, {
+      ruleId: 'parameter-made-required',
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, 'parameters', name),
+        pointerNew: opPointer(baseLoc, 'parameters', name),
+        context: 'parameter',
+      },
+    });
+  }
+
+  if (!deepEqual(oldP.style, newP.style) || !deepEqual(oldP.explode, newP.explode)) {
+    emit(ctx, {
+      ruleId: 'parameter-style-changed',
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, 'parameters', name, 'style'),
+        pointerNew: opPointer(baseLoc, 'parameters', name, 'style'),
+        context: 'parameter',
+      },
+      oldValue: oldP.style ?? (oldP.explode !== undefined ? `explode:${oldP.explode}` : undefined),
+      newValue: newP.style ?? (newP.explode !== undefined ? `explode:${newP.explode}` : undefined),
+    });
+  }
+
+  // full schema differ over the parameter's inline schema (§10.3/§10.4)
+  const oldSchema = isObject(oldP.schema) ? oldP.schema : undefined;
+  const newSchema = isObject(newP.schema) ? newP.schema : undefined;
+  if (oldSchema && newSchema) {
+    const sideClass =
+      baseLoc.context === 'webhook' || baseLoc.context === 'callback' ? 'parse' : 'send';
+    diffSchemaNode(
+      ctx,
+      oldSchema,
+      newSchema,
+      opPointer(baseLoc, 'parameters', name, 'schema'),
+      opPointer(baseLoc, 'parameters', name, 'schema'),
+      { context: 'parameter', path: baseLoc.path, method: baseLoc.method ?? '' },
+      {
+        requiredOld: stringArrayOf(oldSchema.required),
+        requiredNew: stringArrayOf(newSchema.required),
+        sideClass,
+      },
+    );
+  }
+
+  if (
+    !deepEqual(oldP.description, newP.description) ||
+    !deepEqual(oldP.example, newP.example) ||
+    !deepEqual(oldP.deprecated, newP.deprecated)
+  ) {
+    emit(ctx, {
+      ruleId: 'parameter-metadata-changed',
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, 'parameters', name),
+        pointerNew: opPointer(baseLoc, 'parameters', name),
+        context: 'parameter',
+      },
+    });
+  }
+}
+
 function diffRequestBody(
   ctx: DiffContext,
-  baseLoc: { path: string; method: string },
+  baseLoc: BaseOpLoc,
   oldOp: JsonObject,
   newOp: JsonObject,
 ): void {
   const oldBody = isObject(oldOp.requestBody) ? oldOp.requestBody : undefined;
   const newBody = isObject(newOp.requestBody) ? newOp.requestBody : undefined;
+  const reqContext = baseLoc.context ?? 'request-body';
+  const sideClass =
+    baseLoc.context === 'webhook' || baseLoc.context === 'callback' ? 'parse' : 'send';
 
   if (oldBody && !newBody) {
     emit(ctx, {
       ruleId: 'request-body-removed',
       location: {
         ...baseLoc,
-        pointerOld: pointerJoin('paths', baseLoc.path, baseLoc.method.toLowerCase(), 'requestBody'),
+        pointerOld: opPointer(baseLoc, 'requestBody'),
         pointerNew: '',
-        context: 'request-body',
+        context: reqContext,
       },
       doctrine: { wasRequired: oldBody.required === true },
     });
@@ -711,8 +752,8 @@ function diffRequestBody(
       location: {
         ...baseLoc,
         pointerOld: '',
-        pointerNew: pointerJoin('paths', baseLoc.path, baseLoc.method.toLowerCase(), 'requestBody'),
-        context: 'request-body',
+        pointerNew: opPointer(baseLoc, 'requestBody'),
+        context: reqContext,
       },
     });
     return;
@@ -723,21 +764,9 @@ function diffRequestBody(
         ruleId: 'request-body-required-changed',
         location: {
           ...baseLoc,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'requestBody',
-            'required',
-          ),
-          pointerNew: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'requestBody',
-            'required',
-          ),
-          context: 'request-body',
+          pointerOld: opPointer(baseLoc, 'requestBody', 'required'),
+          pointerNew: opPointer(baseLoc, 'requestBody', 'required'),
+          context: reqContext,
         },
       });
     }
@@ -751,16 +780,9 @@ function diffRequestBody(
           location: {
             ...baseLoc,
             mediaType: mt,
-            pointerOld: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'requestBody',
-              'content',
-              mt,
-            ),
+            pointerOld: opPointer(baseLoc, 'requestBody', 'content', mt),
             pointerNew: '',
-            context: 'request-body',
+            context: reqContext,
           },
           oldValue: mt,
         });
@@ -774,25 +796,38 @@ function diffRequestBody(
             ...baseLoc,
             mediaType: mt,
             pointerOld: '',
-            pointerNew: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'requestBody',
-              'content',
-              mt,
-            ),
-            context: 'request-body',
+            pointerNew: opPointer(baseLoc, 'requestBody', 'content', mt),
+            context: reqContext,
           },
           newValue: mt,
         });
       }
     }
-    // schema bodies (request view: readOnly pruned, §11.5)
+    // schema bodies & encoding
     for (const mt of Object.keys(oldContent).sort()) {
       if (!(mt in newContent)) continue;
       const oldMt = isObject(oldContent[mt]) ? oldContent[mt] : {};
       const newMt = isObject(newContent[mt]) ? newContent[mt] : {};
+
+      // Multipart encoding changes
+      if (
+        !deepEqual(oldMt.encoding, newMt.encoding) &&
+        (oldMt.encoding !== undefined || newMt.encoding !== undefined)
+      ) {
+        emit(ctx, {
+          ruleId: 'encoding-changed',
+          location: {
+            ...baseLoc,
+            mediaType: mt,
+            pointerOld: opPointer(baseLoc, 'requestBody', 'content', mt, 'encoding'),
+            pointerNew: opPointer(baseLoc, 'requestBody', 'content', mt, 'encoding'),
+            context: reqContext,
+          },
+          oldValue: oldMt.encoding,
+          newValue: newMt.encoding,
+        });
+      }
+
       const oldSchemaRaw = isObject(oldMt.schema) ? oldMt.schema : undefined;
       const newSchemaRaw = isObject(newMt.schema) ? newMt.schema : undefined;
       if (oldSchemaRaw && newSchemaRaw) {
@@ -802,26 +837,10 @@ function diffRequestBody(
           ctx,
           oldSchema,
           newSchema,
-          pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'requestBody',
-            'content',
-            mt,
-            'schema',
-          ),
-          pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'requestBody',
-            'content',
-            mt,
-            'schema',
-          ),
+          opPointer(baseLoc, 'requestBody', 'content', mt, 'schema'),
+          opPointer(baseLoc, 'requestBody', 'content', mt, 'schema'),
           {
-            context: 'request-body',
+            context: reqContext,
             path: baseLoc.path,
             method: baseLoc.method,
             mediaType: mt,
@@ -829,7 +848,7 @@ function diffRequestBody(
           {
             requiredOld: stringArrayOf(oldSchema.required),
             requiredNew: stringArrayOf(newSchema.required),
-            sideClass: 'send',
+            sideClass,
           },
         );
       }
@@ -839,12 +858,13 @@ function diffRequestBody(
 
 function diffResponses(
   ctx: DiffContext,
-  baseLoc: { path: string; method: string },
+  baseLoc: BaseOpLoc,
   oldOp: JsonObject,
   newOp: JsonObject,
 ): void {
   const oldRes = isObject(oldOp.responses) ? oldOp.responses : {};
   const newRes = isObject(newOp.responses) ? newOp.responses : {};
+  const resContext = baseLoc.context ?? 'response-body';
 
   for (const status of Object.keys(oldRes).sort()) {
     if (!(status in newRes)) {
@@ -853,15 +873,9 @@ function diffResponses(
         location: {
           ...baseLoc,
           statusCode: status,
-          pointerOld: pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'responses',
-            status,
-          ),
+          pointerOld: opPointer(baseLoc, 'responses', status),
           pointerNew: '',
-          context: 'response-body',
+          context: resContext,
         },
         oldValue: status,
       });
@@ -879,20 +893,37 @@ function diffResponses(
           location: {
             ...baseLoc,
             statusCode: status,
-            pointerOld: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'responses',
-              status,
-              'headers',
-              h,
-            ),
+            pointerOld: opPointer(baseLoc, 'responses', status, 'headers', h),
             pointerNew: '',
             context: 'response-header',
           },
           oldValue: h,
         });
+      } else {
+        const oldH = isObject(oldHeaders[h]) ? oldHeaders[h] : {};
+        const newH = isObject(newHeaders[h]) ? newHeaders[h] : {};
+        const oldHSchema = isObject(oldH.schema) ? oldH.schema : undefined;
+        const newHSchema = isObject(newH.schema) ? newH.schema : undefined;
+        if (oldHSchema && newHSchema) {
+          diffSchemaNode(
+            ctx,
+            oldHSchema,
+            newHSchema,
+            opPointer(baseLoc, 'responses', status, 'headers', h, 'schema'),
+            opPointer(baseLoc, 'responses', status, 'headers', h, 'schema'),
+            {
+              context: 'response-header',
+              path: baseLoc.path,
+              method: baseLoc.method,
+              statusCode: status,
+            },
+            {
+              requiredOld: stringArrayOf(oldHSchema.required),
+              requiredNew: stringArrayOf(newHSchema.required),
+              sideClass: 'parse',
+            },
+          );
+        }
       }
     }
     for (const h of Object.keys(newHeaders).sort()) {
@@ -903,15 +934,7 @@ function diffResponses(
             ...baseLoc,
             statusCode: status,
             pointerOld: '',
-            pointerNew: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'responses',
-              status,
-              'headers',
-              h,
-            ),
+            pointerNew: opPointer(baseLoc, 'responses', status, 'headers', h),
             context: 'response-header',
           },
           newValue: h,
@@ -929,17 +952,9 @@ function diffResponses(
             ...baseLoc,
             statusCode: status,
             mediaType: mt,
-            pointerOld: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'responses',
-              status,
-              'content',
-              mt,
-            ),
+            pointerOld: opPointer(baseLoc, 'responses', status, 'content', mt),
             pointerNew: '',
-            context: 'response-body',
+            context: resContext,
           },
           oldValue: mt,
         });
@@ -954,16 +969,8 @@ function diffResponses(
             statusCode: status,
             mediaType: mt,
             pointerOld: '',
-            pointerNew: pointerJoin(
-              'paths',
-              baseLoc.path,
-              baseLoc.method.toLowerCase(),
-              'responses',
-              status,
-              'content',
-              mt,
-            ),
-            context: 'response-body',
+            pointerNew: opPointer(baseLoc, 'responses', status, 'content', mt),
+            context: resContext,
           },
           newValue: mt,
         });
@@ -983,28 +990,10 @@ function diffResponses(
           ctx,
           oldSchema,
           newSchema,
-          pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'responses',
-            status,
-            'content',
-            mt,
-            'schema',
-          ),
-          pointerJoin(
-            'paths',
-            baseLoc.path,
-            baseLoc.method.toLowerCase(),
-            'responses',
-            status,
-            'content',
-            mt,
-            'schema',
-          ),
+          opPointer(baseLoc, 'responses', status, 'content', mt, 'schema'),
+          opPointer(baseLoc, 'responses', status, 'content', mt, 'schema'),
           {
-            context: 'response-body',
+            context: resContext,
             path: baseLoc.path,
             method: baseLoc.method,
             statusCode: status,
@@ -1027,14 +1016,8 @@ function diffResponses(
         ...baseLoc,
         statusCode: status,
         pointerOld: '',
-        pointerNew: pointerJoin(
-          'paths',
-          baseLoc.path,
-          baseLoc.method.toLowerCase(),
-          'responses',
-          status,
-        ),
-        context: 'response-body',
+        pointerNew: opPointer(baseLoc, 'responses', status),
+        context: resContext,
       },
       newValue: status,
     });
@@ -1054,6 +1037,17 @@ function diffWebhooks(ctx: DiffContext): void {
         },
         oldValue: name,
       });
+    } else {
+      const oldItem = ctx.baselineIndex.webhooks.get(name)!;
+      const newItem = ctx.currentIndex.webhooks.get(name)!;
+      const oldMethods = methodKeys(oldItem);
+      const newMethods = methodKeys(newItem);
+      for (const m of oldMethods.filter((m) => newMethods.includes(m))) {
+        diffOperationPair(ctx, name, m, oldItem, newItem, {
+          pointerPrefix: ['webhooks', name, m.toLowerCase()],
+          context: 'webhook',
+        });
+      }
     }
   }
   for (const name of ctx.currentIndex.webhooks.keys()) {
@@ -1374,7 +1368,10 @@ function diffSecurity(ctx: DiffContext): void {
       });
       continue;
     }
-    if (!deepEqual(oldScheme.type, newScheme.type)) {
+    const oldType = Array.isArray(oldScheme.type) ? oldScheme.type[0] : oldScheme.type;
+    const newType = Array.isArray(newScheme.type) ? newScheme.type[0] : newScheme.type;
+
+    if (!deepEqual(oldType, newType)) {
       emit(ctx, {
         ruleId: 'security-type-changed',
         location: {
@@ -1383,25 +1380,70 @@ function diffSecurity(ctx: DiffContext): void {
           pointerOld: pointerJoin('components', 'securitySchemes', name, 'type'),
           pointerNew: pointerJoin('components', 'securitySchemes', name, 'type'),
         },
-        oldValue: oldScheme.type,
-        newValue: newScheme.type,
+        oldValue: oldType,
+        newValue: newType,
       });
     }
+    if (oldType === 'apiKey' && newType === 'apiKey') {
+      if (!deepEqual(oldScheme.in, newScheme.in)) {
+        emit(ctx, {
+          ruleId: 'api-key-location-changed',
+          location: {
+            context: 'security',
+            path: '/',
+            pointerOld: pointerJoin('components', 'securitySchemes', name, 'in'),
+            pointerNew: pointerJoin('components', 'securitySchemes', name, 'in'),
+          },
+          oldValue: oldScheme.in,
+          newValue: newScheme.in,
+        });
+      }
+      if (!deepEqual(oldScheme.name, newScheme.name)) {
+        emit(ctx, {
+          ruleId: 'api-key-location-changed',
+          location: {
+            context: 'security',
+            path: '/',
+            pointerOld: pointerJoin('components', 'securitySchemes', name, 'name'),
+            pointerNew: pointerJoin('components', 'securitySchemes', name, 'name'),
+          },
+          oldValue: oldScheme.name,
+          newValue: newScheme.name,
+        });
+      }
+    }
     if (
-      oldScheme.type === 'apiKey' &&
-      newScheme.type === 'apiKey' &&
-      !deepEqual(oldScheme.in, newScheme.in)
+      oldType === 'http' &&
+      newType === 'http' &&
+      !deepEqual(oldScheme.scheme, newScheme.scheme)
     ) {
       emit(ctx, {
-        ruleId: 'api-key-location-changed',
+        ruleId: 'security-type-changed',
         location: {
           context: 'security',
           path: '/',
-          pointerOld: pointerJoin('components', 'securitySchemes', name, 'in'),
-          pointerNew: pointerJoin('components', 'securitySchemes', name, 'in'),
+          pointerOld: pointerJoin('components', 'securitySchemes', name, 'scheme'),
+          pointerNew: pointerJoin('components', 'securitySchemes', name, 'scheme'),
         },
-        oldValue: oldScheme.in,
-        newValue: newScheme.in,
+        oldValue: oldScheme.scheme,
+        newValue: newScheme.scheme,
+      });
+    }
+    if (
+      oldType === 'openIdConnect' &&
+      newType === 'openIdConnect' &&
+      !deepEqual(oldScheme.openIdConnectUrl, newScheme.openIdConnectUrl)
+    ) {
+      emit(ctx, {
+        ruleId: 'security-type-changed',
+        location: {
+          context: 'security',
+          path: '/',
+          pointerOld: pointerJoin('components', 'securitySchemes', name, 'openIdConnectUrl'),
+          pointerNew: pointerJoin('components', 'securitySchemes', name, 'openIdConnectUrl'),
+        },
+        oldValue: oldScheme.openIdConnectUrl,
+        newValue: newScheme.openIdConnectUrl,
       });
     }
     // oauth flows/scopes

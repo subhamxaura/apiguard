@@ -99,7 +99,7 @@ export function renderTerminal(report: DiffReport, options: RenderOptions): stri
 
 /** Suggested bump line (§13): "Suggested version bump: MAJOR" — empty when none. */
 export function suggestLine(report: DiffReport): string | null {
-  const bump = report.semver.bump;
+  const bump = report.semver?.bump ?? 'none';
   if (bump === 'none') return null;
   const label = bump === 'major' ? 'MAJOR' : bump === 'minor' ? 'MINOR' : 'PATCH';
   return `Suggested version bump: ${label}`;

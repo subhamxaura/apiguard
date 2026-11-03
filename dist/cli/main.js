@@ -16,7 +16,7 @@ import {
   renderHtml,
   renderSarif,
   validateSemantics
-} from "../chunk-EJQ5XOY6.js";
+} from "../chunk-MXITL6RV.js";
 
 // src/cli/run.ts
 import { Command } from "commander";
@@ -30,7 +30,7 @@ function exitCodeFor(err) {
     if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
       return ExitCode.Ok;
     }
-    return err.exitCode > 0 ? err.exitCode : ExitCode.Usage;
+    return ExitCode.Usage;
   }
   if (err instanceof ApiguardError) return err.exitCode;
   return ExitCode.Internal;
@@ -38,13 +38,16 @@ function exitCodeFor(err) {
 function renderError(err, verbose = false) {
   if (isCommanderError(err)) {
     if (err.code === "commander.helpDisplayed" || err.code === "commander.version") return "";
-    return `error: ${err.message}`;
+    const cleanMsg2 = err.message.replace(/^error:\s*/i, "");
+    return `error: ${cleanMsg2}`;
   }
   if (err instanceof ApiguardError) {
     const hint = err.exitCode === ExitCode.Internal ? " (please report this bug)" : "";
-    return `error: ${err.message}${hint}${verbose && err.stack ? "\n" + err.stack : ""}`;
+    const cleanMsg2 = err.message.replace(/^error:\s*/i, "");
+    return `error: ${cleanMsg2}${hint}${verbose && err.stack ? "\n" + err.stack : ""}`;
   }
-  return `error: unexpected internal error: ${errorMessage(err)} (please report this bug)`;
+  const cleanMsg = errorMessage(err).replace(/^error:\s*/i, "");
+  return `error: unexpected internal error: ${cleanMsg} (please report this bug)`;
 }
 
 // src/cli/diff-command.ts
@@ -124,7 +127,7 @@ function renderTerminal(report, options) {
   return lines;
 }
 function suggestLine(report) {
-  const bump = report.semver.bump;
+  const bump = report.semver?.bump ?? "none";
   if (bump === "none") return null;
   const label = bump === "major" ? "MAJOR" : bump === "minor" ? "MINOR" : "PATCH";
   return `Suggested version bump: ${label}`;
@@ -141,16 +144,17 @@ function resolveFormat(opts) {
   if (opts.markdown) return "markdown";
   if (opts.html) return "html";
   if (opts.sarif) return "sarif";
+  if (opts.junit) return "junit";
   if (opts.format !== void 0) {
-    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown" || opts.format === "html" || opts.format === "sarif") {
+    if (opts.format === "terminal" || opts.format === "json" || opts.format === "markdown" || opts.format === "html" || opts.format === "sarif" || opts.format === "junit") {
       return opts.format;
     }
     throw new CliUsageError(
-      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif)`
+      `invalid --format "${opts.format}" (expected terminal|json|markdown|html|sarif|junit)`
     );
   }
   const envFormat = process.env.APIGUARD_FORMAT;
-  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal" || envFormat === "html" || envFormat === "sarif")
+  if (envFormat === "json" || envFormat === "markdown" || envFormat === "terminal" || envFormat === "html" || envFormat === "sarif" || envFormat === "junit")
     return envFormat;
   return "terminal";
 }
@@ -188,7 +192,8 @@ async function runDiff(oldSpec, newSpec, opts, io) {
     includeNonBreaking: opts.strict || opts.includeNonBreaking,
     suggestVersion: opts.suggestVersion,
     noColor: !colorEnabled(opts, loaded.config.output.color),
-    profile: opts.profile
+    profile: opts.profile,
+    allowExternalFiles: opts.allowExternalFiles
   });
   const { report } = await analyze(oldSpec, newSpec, {
     config,
@@ -201,12 +206,15 @@ async function runDiff(oldSpec, newSpec, opts, io) {
   } else if (config.output.format === "json") {
     body = renderJson(report);
   } else if (config.output.format === "markdown") {
-    const { renderMarkdown } = await import("../markdown-J2EC3VFS.js");
+    const { renderMarkdown } = await import("../markdown-YQJG7PV2.js");
     body = renderMarkdown(report);
   } else if (config.output.format === "html") {
     body = renderHtml(report);
   } else if (config.output.format === "sarif") {
     body = renderSarif(report);
+  } else if (config.output.format === "junit") {
+    const { renderJunit } = await import("../junit-WONFDNTB.js");
+    body = renderJunit(report);
   } else {
     const lines = renderTerminal(report, {
       includeNonBreaking: config.output.includeNonBreaking,
@@ -458,13 +466,15 @@ function buildProgram(io) {
   program.exitOverride();
   program.configureOutput({
     writeOut: (s) => io.stdout(s.trimEnd()),
-    writeErr: (s) => io.stderr(s.trimEnd())
+    writeErr: () => {
+    }
+    // Commander usage errors are formatted and rendered once via renderError in run()
   });
   program.name("apiguard").version(TOOL_VERSION).description("Detect breaking changes between OpenAPI specifications");
-  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option(
+  const diff = program.command("diff").description("Diff two OpenAPI specs and report breaking changes").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option(
     "--format <f>",
-    "terminal|json|markdown|html|sarif (aliases: --json, --markdown, --html, --sarif)"
-  ).option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--html", "shorthand for --format html").option("--sarif", "shorthand for --format sarif").option("--open", "open interactive HTML report in browser").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--profile <p>", "client persona profile (default|strict-sdk|loose-web)").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
+    "terminal|json|markdown|html|sarif|junit (aliases: --json, --markdown, --html, --sarif, --junit)"
+  ).option("--json", "shorthand for --format json").option("--markdown", "shorthand for --format markdown").option("--html", "shorthand for --format html").option("--sarif", "shorthand for --format sarif").option("--junit", "shorthand for --format junit").option("--allow-external-files", "allow $ref to files outside spec directory").option("--open", "open interactive HTML report in browser").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--profile <p>", "client persona profile (default|strict-sdk|loose-web)").option("--config <path>", "explicit config file (missing file: exit 2)").option("--fail-on <level>", "error|warning|never", "error").option("--strict", "shorthand for --fail-on warning AND --include-non-breaking").option("--quiet", "print only the one-line verdict").option("--suggest-version", "print suggested version bump after the report").option("--include-non-breaking", "also render warning+info changes").option("--output <path>", "also write the full report to a file").option("--no-color", "disable ANSI color (auto-detected for non-TTY)").option("--show-ignored", "render changes suppressed by ignore rules, tagged ignored").option("--verbose", "log parse/config steps to stderr").action(async (oldSpec, newSpec, opts) => {
     const code = await runDiff(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
@@ -472,14 +482,14 @@ function buildProgram(io) {
     }
   });
   void diff;
-  program.command("changelog").description("Generate a Keep-a-Changelog formatted release summary from spec diff").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--config <path>", "explicit config file").option("--output <path>", "write changelog to file").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--json", "output changelog as JSON").action(async (oldSpec, newSpec, opts) => {
+  program.command("changelog").description("Generate a Keep-a-Changelog formatted release summary from spec diff").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option("--config <path>", "explicit config file").option("--output <path>", "write changelog to file").option("--git-base <ref>", "resolve baseline against git branch or commit").option("--json", "output changelog as JSON").action(async (oldSpec, newSpec, opts) => {
     const code = await runChangelog(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
       program.__apiguardExitCode = code;
     }
   });
-  program.command("codegen-shim").description("Generate backward-compatibility gateway adapter for breaking changes").argument("<old-spec>", "baseline spec path").argument("<new-spec>", "current spec path").option("--target <t>", "express|cloudflare-worker|envoy-lua", "express").option("--config <path>", "explicit config file").option("--output <path>", "write generated shim code to file").option("--git-base <ref>", "resolve baseline against git branch or commit").action(async (oldSpec, newSpec, opts) => {
+  program.command("codegen-shim").description("Generate backward-compatibility gateway adapter for breaking changes").argument("<old-spec>", "baseline spec path").argument("[new-spec]", "current spec path").option("--target <t>", "express|cloudflare-worker|envoy-lua", "express").option("--config <path>", "explicit config file").option("--output <path>", "write generated shim code to file").option("--git-base <ref>", "resolve baseline against git branch or commit").action(async (oldSpec, newSpec, opts) => {
     const code = await runCodegenShim(oldSpec, newSpec, opts, io);
     if (code !== ExitCode.Ok) {
       process.exitCode = code;
@@ -504,7 +514,8 @@ async function run(io = defaultIo) {
     const code = program.__apiguardExitCode;
     return code ?? ExitCode.Ok;
   } catch (err) {
-    io.stderr(renderError(err, io.env.APIGUARD_VERBOSE === "1"));
+    const rendered = renderError(err, io.env.APIGUARD_VERBOSE === "1");
+    if (rendered) io.stderr(rendered);
     return exitCodeFor(err);
   }
 }

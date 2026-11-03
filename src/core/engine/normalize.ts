@@ -42,18 +42,25 @@ function normalizeNode(node: unknown): unknown {
   const nullable = obj.nullable === true;
   if (typeof typeValue === 'string') typeValue = [typeValue];
   if (Array.isArray(typeValue)) typeValue = [...typeValue].sort();
-  if (nullable && Array.isArray(typeValue)) {
-    typeValue = typeValue.includes('null') ? typeValue : [...typeValue, 'null'].sort();
+  if (nullable) {
+    if (Array.isArray(typeValue)) {
+      typeValue = typeValue.includes('null') ? typeValue : [...typeValue, 'null'].sort();
+    } else if (typeValue === undefined) {
+      typeValue = ['null'];
+    }
+  }
+
+  const allKeys = new Set(Object.keys(obj));
+  allKeys.delete('nullable');
+  if (typeValue !== undefined) {
+    allKeys.add('type');
   }
 
   const out: Record<string, unknown> = {};
-  for (const key of Object.keys(obj).sort()) {
+  for (const key of Array.from(allKeys).sort()) {
     switch (key) {
       case 'type':
         if (typeValue !== undefined) out.type = typeValue;
-        break;
-      case 'nullable':
-        // consumed into the type array; `nullable: false` is the default and is dropped
         break;
       case 'exclusiveMinimum':
         if (exclusiveMin !== undefined) out.exclusiveMinimum = exclusiveMin;

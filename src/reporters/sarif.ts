@@ -2,6 +2,7 @@
  * SARIF 2.1.0 reporter for GitHub Advanced Security / Code Scanning integration.
  * Conforms to OASIS SARIF v2.1.0 specification.
  */
+import path from 'node:path';
 import type { DiffReport } from '../core/models/report.js';
 import type { Severity } from '../core/models/change.js';
 import { getAllRules } from '../core/rules/rule-registry.js';
@@ -36,7 +37,12 @@ export function renderSarif(report: DiffReport): string {
   }));
 
   const results = report.changes.map((c) => {
-    const fileUri = (c.location.file || report.current.source).replace(/\\/g, '/');
+    const rawPath = c.location.file || report.current.source;
+    const rel = path.isAbsolute(rawPath) ? path.relative(process.cwd(), rawPath) : rawPath;
+    let fileUri = rel.replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+    if (!fileUri || fileUri === '.') {
+      fileUri = path.basename(report.current.source) || 'openapi.yaml';
+    }
     const line = c.location.line && c.location.line > 0 ? c.location.line : 1;
     const col = c.location.column && c.location.column > 0 ? c.location.column : 1;
 

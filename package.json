@@ -56,7 +56,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:action": "esbuild src/github/action-entry.ts --bundle --platform=node --target=node20 --outfile=dist/index.cjs --minify",
+    "build:action": "esbuild src/github/action-entry.ts --bundle --platform=node --target=node20 --outfile=dist/action.cjs --minify",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format:check": "prettier --check .",

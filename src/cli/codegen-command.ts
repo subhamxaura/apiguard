@@ -15,7 +15,7 @@ export interface CodegenOptions {
 
 export async function runCodegenShim(
   oldSpec: string,
-  newSpec: string,
+  newSpec: string | undefined,
   opts: CodegenOptions,
   io: CliIo,
 ): Promise<number> {

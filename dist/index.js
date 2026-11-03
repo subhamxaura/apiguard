@@ -9,7 +9,10 @@ import {
   renderSarif,
   suggestVersion,
   validateSemantics
-} from "./chunk-EJQ5XOY6.js";
+} from "./chunk-MXITL6RV.js";
+import {
+  renderJunit
+} from "./chunk-XKUMVHZN.js";
 
 // src/index.ts
 async function validateSpec(specPath, options) {
@@ -24,6 +27,7 @@ export {
   loadConfigFrom,
   renderChangelog,
   renderHtml,
+  renderJunit,
   renderSarif,
   suggestVersion,
   validateSpec

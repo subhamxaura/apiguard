@@ -26,7 +26,7 @@ export function exitCodeFor(err: unknown): number {
     if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
       return ExitCode.Ok;
     }
-    return err.exitCode > 0 ? err.exitCode : ExitCode.Usage; // commander default: 1 = usage
+    return ExitCode.Usage; // Commander usage / parsing errors return ExitCode.Usage (exit code 2)
   }
   if (err instanceof ApiguardError) return err.exitCode;
   return ExitCode.Internal;
@@ -38,11 +38,14 @@ export function renderError(err: unknown, verbose = false): string {
     // --help/--version and usage errors are informational/usage output, not internal faults;
     // commander already wrote the help/usage text via configureOutput.
     if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') return '';
-    return `error: ${err.message}`;
+    const cleanMsg = err.message.replace(/^error:\s*/i, '');
+    return `error: ${cleanMsg}`;
   }
   if (err instanceof ApiguardError) {
     const hint = err.exitCode === ExitCode.Internal ? ' (please report this bug)' : '';
-    return `error: ${err.message}${hint}${verbose && err.stack ? '\n' + err.stack : ''}`;
+    const cleanMsg = err.message.replace(/^error:\s*/i, '');
+    return `error: ${cleanMsg}${hint}${verbose && err.stack ? '\n' + err.stack : ''}`;
   }
-  return `error: unexpected internal error: ${errorMessage(err)} (please report this bug)`;
+  const cleanMsg = errorMessage(err).replace(/^error:\s*/i, '');
+  return `error: unexpected internal error: ${cleanMsg} (please report this bug)`;
 }

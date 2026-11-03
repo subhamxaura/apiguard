@@ -16,10 +16,11 @@ function endpointOf(change: ApiChange): string {
 /** Render a DiffReport into Keep-a-Changelog Markdown format. */
 export function renderChangelog(report: DiffReport): string {
   const lines: string[] = [];
+  const bump = report.semver?.bump ?? 'none';
   const version =
-    report.semver.bump === 'none'
+    bump === 'none'
       ? 'Current Release (No version bump)'
-      : `Next Release (Recommended bump: ${report.semver.bump.toUpperCase()})`;
+      : `Next Release (Recommended bump: ${bump.toUpperCase()})`;
   lines.push(`## ${version}`);
   lines.push('');
 

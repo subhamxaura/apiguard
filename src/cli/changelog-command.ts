@@ -15,7 +15,7 @@ export interface ChangelogOptions {
 
 export async function runChangelog(
   oldSpec: string,
-  newSpec: string,
+  newSpec: string | undefined,
   opts: ChangelogOptions,
   io: CliIo,
 ): Promise<number> {

@@ -1,0 +1,5112 @@
+// src/core/config/loader.ts
+import fs from "fs";
+import path from "path";
+import { parse as parseYaml } from "yaml";
+import { ZodError } from "zod";
+
+// src/core/config/schema.ts
+import { z } from "zod";
+var severityValueSchema = z.enum(["error", "warning", "info", "off"]);
+var rulesSchema = z.record(z.string().min(1), severityValueSchema);
+var ignoreSchema = z.strictObject({
+  paths: z.array(z.string()).optional().default([]),
+  operations: z.array(z.string()).optional().default([]),
+  schemas: z.array(z.string()).optional().default([]),
+  changes: z.array(z.string()).optional().default([]),
+  "show-ignored": z.boolean().optional().default(false)
+});
+var outputSchema = z.strictObject({
+  format: z.enum(["terminal", "json", "markdown", "html", "sarif", "junit"]).optional().default("terminal"),
+  "include-non-breaking": z.boolean().optional().default(false),
+  color: z.enum(["auto", "always", "never"]).optional().default("auto")
+});
+var versioningSchema = z.strictObject({
+  suggest: z.boolean().optional().default(true)
+});
+var loaderSchema = z.strictObject({
+  "allow-remote-refs": z.boolean().optional().default(false),
+  "allow-external-files": z.boolean().optional().default(false),
+  "allow-private-ips": z.boolean().optional().default(false),
+  headers: z.record(z.string(), z.string()).optional().default({})
+});
+var githubSchema = z.strictObject({
+  comment: z.boolean().optional().default(true),
+  "check-run": z.boolean().optional().default(true),
+  "update-existing-comment": z.boolean().optional().default(true)
+});
+var profileSchema = z.enum(["default", "strict-sdk", "loose-web"]).default("default");
+var configSchema = z.strictObject({
+  schemaVersion: z.literal(1, {
+    error: "schemaVersion must be 1 (other versions are rejected; see docs/configuration.md)"
+  }),
+  rules: rulesSchema.optional().default({}),
+  ignore: ignoreSchema.optional(),
+  output: outputSchema.optional(),
+  "fail-on": z.enum(["error", "warning", "never"]).optional(),
+  versioning: versioningSchema.optional(),
+  profile: profileSchema.optional(),
+  loader: loaderSchema.optional(),
+  github: githubSchema.optional()
+});
+
+// src/core/config/defaults.ts
+var DEFAULT_CONFIG = {
+  schemaVersion: 1,
+  rules: {},
+  ignore: {
+    paths: [],
+    operations: [],
+    schemas: [],
+    changes: [],
+    showIgnored: false
+  },
+  output: {
+    format: "terminal",
+    includeNonBreaking: false,
+    color: "auto"
+  },
+  failOn: "error",
+  // §13 golden output shows the bump line "only with --suggest-version"; config may opt in.
+  versioning: { suggest: false },
+  profile: "default",
+  loader: {
+    allowRemoteRefs: false,
+    allowExternalFiles: false,
+    allowPrivateIps: false,
+    headers: {}
+  },
+  github: { comment: true, checkRun: true, updateExistingComment: true }
+};
+
+// src/utils/errors.ts
+var ExitCode = {
+  Ok: 0,
+  BreakingChanges: 1,
+  Usage: 2,
+  SpecError: 3,
+  Internal: 4,
+  Sigint: 130
+};
+var ApiguardError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = new.target.name;
+  }
+};
+var CliUsageError = class extends ApiguardError {
+  exitCode = ExitCode.Usage;
+  constructor(message) {
+    super(message);
+  }
+};
+var ConfigError = class extends ApiguardError {
+  exitCode = ExitCode.Usage;
+  constructor(message) {
+    super(message);
+  }
+};
+var SpecLoadError = class extends ApiguardError {
+  exitCode = ExitCode.SpecError;
+  constructor(message) {
+    super(message);
+  }
+};
+var SpecValidationError = class extends ApiguardError {
+  exitCode = ExitCode.SpecError;
+  constructor(message) {
+    super(message);
+  }
+};
+function errorMessage(err) {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+// src/core/config/loader.ts
+var CONFIG_FILE_CANDIDATES = [
+  "apiguard.yaml",
+  "apiguard.yml",
+  "apiguard.json",
+  ".apiguard.yaml",
+  ".apiguard.yml"
+];
+var LEGACY_RULE_ALIASES = {
+  "removed-request-property": { canonical: "property-removed", scope: "request-body" },
+  "removed-response-property": { canonical: "property-removed", scope: "response-body" },
+  "new-required-request-property": { canonical: "required-property-added", scope: "request-body" }
+};
+function readConfigFile(filePath) {
+  let text;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch {
+    throw new ConfigError(`config file not found: ${filePath}`);
+  }
+  try {
+    if (filePath.toLowerCase().endsWith(".json")) return JSON.parse(text);
+    return parseYaml(text);
+  } catch (e) {
+    throw new ConfigError(`${filePath}: invalid YAML/JSON: ${errorMessage(e)}`);
+  }
+}
+function toResolved(parsed) {
+  return {
+    schemaVersion: 1,
+    rules: parsed.rules ?? {},
+    ignore: {
+      paths: parsed.ignore?.paths ?? [],
+      operations: parsed.ignore?.operations ?? [],
+      schemas: parsed.ignore?.schemas ?? [],
+      changes: parsed.ignore?.changes ?? [],
+      showIgnored: parsed.ignore?.["show-ignored"] ?? false
+    },
+    output: {
+      format: parsed.output?.format ?? "terminal",
+      includeNonBreaking: parsed.output?.["include-non-breaking"] ?? false,
+      color: parsed.output?.color ?? "auto"
+    },
+    failOn: parsed["fail-on"] ?? "error",
+    versioning: { suggest: parsed.versioning?.suggest ?? true },
+    profile: parsed.profile ?? "default",
+    loader: {
+      allowRemoteRefs: parsed.loader?.["allow-remote-refs"] ?? false,
+      allowExternalFiles: parsed.loader?.["allow-external-files"] ?? false,
+      allowPrivateIps: parsed.loader?.["allow-private-ips"] ?? false,
+      headers: parsed.loader?.headers ?? {}
+    },
+    github: {
+      comment: parsed.github?.comment ?? true,
+      checkRun: parsed.github?.["check-run"] ?? true,
+      updateExistingComment: parsed.github?.["update-existing-comment"] ?? true
+    }
+  };
+}
+function resolveConfigObject(raw, sourcePath) {
+  let parsed;
+  try {
+    parsed = configSchema.parse(raw);
+  } catch (e) {
+    if (e instanceof ZodError) {
+      const first = e.issues[0];
+      const where = first?.path?.length ? ` at key "${first.path.join(".")}"` : "";
+      throw new ConfigError(
+        `${sourcePath}: invalid config${where}: ${first?.message ?? "validation failed"}`
+      );
+    }
+    throw new ConfigError(`${sourcePath}: invalid config: ${errorMessage(e)}`);
+  }
+  return toResolved(parsed);
+}
+function applyAliases(raw, warnings) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const obj = raw;
+  const rules = obj.rules;
+  if (rules === null || typeof rules !== "object" || Array.isArray(rules)) return raw;
+  const out = { ...obj, rules: { ...rules } };
+  for (const key of Object.keys(out.rules)) {
+    const alias = LEGACY_RULE_ALIASES[key];
+    if (alias) {
+      const canonicalKey = alias.scope ? `${alias.canonical}@${alias.scope}` : alias.canonical;
+      const value = out.rules[key];
+      delete out.rules[key];
+      out.rules[canonicalKey] = value;
+      warnings.push(
+        `config: rule key "${key}" is deprecated (v1 alias); use "${canonicalKey}" instead`
+      );
+    }
+  }
+  return out;
+}
+function loadConfigFrom(explicitPath) {
+  const warnings = [];
+  const raw = readConfigFile(explicitPath);
+  const withAliases = applyAliases(raw, warnings);
+  const config = resolveConfigObject(withAliases, explicitPath);
+  return { config, sourcePath: explicitPath, warnings };
+}
+function discoverAndLoadConfig(opts = {}) {
+  const cwd = opts.cwd ?? process.cwd();
+  if (opts.explicit || opts.env) {
+    const target = opts.explicit ?? opts.env ?? "";
+    const abs = path.isAbsolute(target) ? target : path.resolve(cwd, target);
+    if (!fs.existsSync(abs)) {
+      throw new ConfigError(`config file not found: ${abs}`);
+    }
+    return loadConfigFrom(abs);
+  }
+  for (const candidate of CONFIG_FILE_CANDIDATES) {
+    const abs = path.resolve(cwd, candidate);
+    if (fs.existsSync(abs)) {
+      return loadConfigFrom(abs);
+    }
+  }
+  return { config: { ...DEFAULT_CONFIG }, sourcePath: "", warnings: [] };
+}
+function mergeWithFlags(base, flags) {
+  return {
+    ...base,
+    output: {
+      format: flags.format ?? base.output.format,
+      includeNonBreaking: flags.includeNonBreaking ?? base.output.includeNonBreaking,
+      color: flags.noColor ? "never" : base.output.color
+    },
+    failOn: flags.failOn ?? base.failOn,
+    versioning: {
+      suggest: flags.suggestVersion ?? base.versioning.suggest
+    },
+    profile: flags.profile ?? base.profile,
+    loader: {
+      ...base.loader,
+      allowExternalFiles: flags.allowExternalFiles ?? base.loader.allowExternalFiles
+    }
+  };
+}
+
+// src/loaders/spec-loader.ts
+import fs2 from "fs";
+import path2 from "path";
+import os from "os";
+import { execFileSync } from "child_process";
+import SwaggerParser from "@apidevtools/swagger-parser";
+import { parse as parseYaml2 } from "yaml";
+
+// src/utils/hash.ts
+import { createHash } from "crypto";
+function canonicalize(value) {
+  return stableStringify(value);
+}
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableStringify).join(",") + "]";
+  }
+  const obj = value;
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+}
+function sha256OfValue(value) {
+  return createHash("sha256").update(canonicalize(value)).digest("hex");
+}
+function changeId(parts) {
+  const method = parts.method ?? "";
+  const oldJson = parts.oldValue === void 0 ? "" : canonicalize(parts.oldValue);
+  const newJson = parts.newValue === void 0 ? "" : canonicalize(parts.newValue);
+  const key = [
+    parts.ruleId,
+    parts.context,
+    parts.path,
+    method,
+    parts.pointerOld,
+    parts.pointerNew,
+    oldJson,
+    newJson
+  ].join("|");
+  return createHash("sha256").update(key).digest("hex").slice(0, 16);
+}
+
+// src/core/engine/normalize.ts
+function normalizeDocument(document) {
+  return normalizeNode(document);
+}
+function normalizeNode(node) {
+  if (node === null || typeof node !== "object") return node;
+  if (Array.isArray(node)) {
+    return node.map((v) => normalizeNode(v));
+  }
+  const obj = node;
+  const minimum = obj.minimum;
+  const maximum = obj.maximum;
+  let exclusiveMin = obj.exclusiveMinimum;
+  let exclusiveMax = obj.exclusiveMaximum;
+  const minIsExclusive = exclusiveMin === true && typeof minimum === "number";
+  const maxIsExclusive = exclusiveMax === true && typeof maximum === "number";
+  if (minIsExclusive) exclusiveMin = minimum;
+  else if (exclusiveMin === false) exclusiveMin = void 0;
+  if (maxIsExclusive) exclusiveMax = maximum;
+  else if (exclusiveMax === false) exclusiveMax = void 0;
+  let typeValue = obj.type;
+  const nullable = obj.nullable === true;
+  if (typeof typeValue === "string") typeValue = [typeValue];
+  if (Array.isArray(typeValue)) typeValue = [...typeValue].sort();
+  if (nullable) {
+    if (Array.isArray(typeValue)) {
+      typeValue = typeValue.includes("null") ? typeValue : [...typeValue, "null"].sort();
+    } else if (typeValue === void 0) {
+      typeValue = ["null"];
+    }
+  }
+  const allKeys = new Set(Object.keys(obj));
+  allKeys.delete("nullable");
+  if (typeValue !== void 0) {
+    allKeys.add("type");
+  }
+  const out = {};
+  for (const key of Array.from(allKeys).sort()) {
+    switch (key) {
+      case "type":
+        if (typeValue !== void 0) out.type = typeValue;
+        break;
+      case "exclusiveMinimum":
+        if (exclusiveMin !== void 0) out.exclusiveMinimum = exclusiveMin;
+        break;
+      case "exclusiveMaximum":
+        if (exclusiveMax !== void 0) out.exclusiveMaximum = exclusiveMax;
+        break;
+      case "minimum":
+        if (!minIsExclusive && minimum !== void 0) out.minimum = minimum;
+        break;
+      case "maximum":
+        if (!maxIsExclusive && maximum !== void 0) out.maximum = maximum;
+        break;
+      default:
+        out[key] = normalizeNode(obj[key]);
+        break;
+    }
+  }
+  return out;
+}
+function toNormalizedSpec(loaded, normalized) {
+  return { ...loaded, normalized, sha256: sha256OfValue(normalized) };
+}
+
+// src/loaders/spec-loader.ts
+function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase().trim();
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0" || h === "::") {
+    return true;
+  }
+  const ipv4Match = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [b0, b1] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
+    if (b0 === 127) return true;
+    if (b0 === 10) return true;
+    if (b0 === 172 && b1 >= 16 && b1 <= 31) return true;
+    if (b0 === 192 && b1 === 168) return true;
+    if (b0 === 169 && b1 === 254) return true;
+    if (b0 === 0) return true;
+  }
+  if (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80:")) {
+    return true;
+  }
+  return false;
+}
+async function fetchRemoteSpec(urlStr, options = {}) {
+  let url;
+  try {
+    url = new URL(urlStr);
+  } catch (e) {
+    throw new SpecLoadError(`${urlStr}: invalid URL: ${errorMessage(e)}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new SpecLoadError(
+      `${urlStr}: unsupported protocol "${url.protocol}" (expected http: or https:)`
+    );
+  }
+  if (!options.allowPrivateIps && isPrivateHost(url.hostname)) {
+    throw new SpecLoadError(
+      `${urlStr}: remote spec blocked: private or loopback host "${url.hostname}" denied by SSRF protection. Set loader.allow-private-ips: true in apiguard.yaml or CLI to opt in.`
+    );
+  }
+  let text;
+  try {
+    const res = await fetch(urlStr, {
+      headers: options.headers ?? {},
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res.ok) {
+      throw new SpecLoadError(
+        `${urlStr}: failed to fetch spec (HTTP ${res.status} ${res.statusText})`
+      );
+    }
+    text = await res.text();
+  } catch (e) {
+    if (e instanceof SpecLoadError) throw e;
+    throw new SpecLoadError(`${urlStr}: network error fetching spec: ${errorMessage(e)}`);
+  }
+  const tmpDir = fs2.mkdtempSync(path2.join(os.tmpdir(), "apiguard-remote-"));
+  const ext = url.pathname.toLowerCase().endsWith(".json") ? ".json" : ".yaml";
+  const localPath = path2.join(tmpDir, "spec" + ext);
+  fs2.writeFileSync(localPath, text, "utf8");
+  return { localPath, text };
+}
+function fetchGitSpec(gitUri, cwd = process.cwd()) {
+  const stripped = gitUri.replace(/^git:\/\//i, "").replace(/^git:/i, "");
+  const colonIdx = stripped.indexOf(":");
+  if (colonIdx === -1) {
+    throw new SpecLoadError(`${gitUri}: invalid git spec URI (expected git://<rev>:<path>)`);
+  }
+  const rev = stripped.slice(0, colonIdx);
+  const relPath = stripped.slice(colonIdx + 1);
+  const gitRelPath = relPath.replace(/\\/g, "/");
+  let text;
+  try {
+    text = execFileSync("git", ["show", `${rev}:${gitRelPath}`], { cwd, encoding: "utf8" });
+  } catch (e) {
+    throw new SpecLoadError(
+      `${gitUri}: failed to retrieve spec from git (${rev}:${relPath}): ${errorMessage(e)}`
+    );
+  }
+  const tmpDir = fs2.mkdtempSync(path2.join(os.tmpdir(), "apiguard-git-"));
+  const ext = relPath.toLowerCase().endsWith(".json") ? ".json" : ".yaml";
+  const localPath = path2.join(tmpDir, path2.basename(relPath) || "spec" + ext);
+  fs2.writeFileSync(localPath, text, "utf8");
+  return { localPath, text };
+}
+function parseSpecText(text, source) {
+  let parsed;
+  const isJsonByExt = source.trimEnd().toLowerCase().endsWith(".json");
+  if (isJsonByExt) {
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new SpecLoadError(`${source}: JSON parse error: ${errorMessage(e)}`);
+    }
+  } else {
+    try {
+      parsed = parseYaml2(text, { schema: "core" });
+    } catch (e) {
+      throw new SpecLoadError(`${source}: YAML parse error: ${errorMessage(e)}`);
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SpecLoadError(
+      `${source}: spec root must be a mapping object with an 'openapi' field (got ${describeRoot(parsed)})`
+    );
+  }
+  return parsed;
+}
+function describeRoot(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "an array";
+  return `a ${typeof v}`;
+}
+function findRemoteRefs(document) {
+  const found = [];
+  const stack = [document];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object") continue;
+    if (Array.isArray(node)) {
+      for (const v of node) stack.push(v);
+      continue;
+    }
+    const obj = node;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "$ref" && typeof v === "string") {
+        const target = v.split("#")[0] ?? "";
+        if (/^https?:\/\//i.test(target)) found.push(v);
+      } else if (v !== null && typeof v === "object") {
+        stack.push(v);
+      }
+    }
+  }
+  return found;
+}
+function findExternalFileRefs(document, specDir) {
+  const found = [];
+  const stack = [document];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object") continue;
+    if (Array.isArray(node)) {
+      for (const v of node) stack.push(v);
+      continue;
+    }
+    const obj = node;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "$ref" && typeof v === "string") {
+        const filePart = v.split("#")[0] ?? "";
+        if (filePart && !/^[a-z][a-z0-9+.-]*:/i.test(filePart)) {
+          const resolved = path2.resolve(specDir, filePart);
+          const rel = path2.relative(specDir, resolved);
+          if (rel.startsWith("..") || path2.isAbsolute(rel)) found.push(v);
+        }
+      } else if (v !== null && typeof v === "object") {
+        stack.push(v);
+      }
+    }
+  }
+  return found;
+}
+async function loadSpec(filePath, options = {}) {
+  let abs;
+  let text;
+  let tmpDirToClean;
+  try {
+    if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+      const fetched = await fetchRemoteSpec(filePath, options.loader);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = path2.dirname(fetched.localPath);
+    } else if (filePath.startsWith("git://") || filePath.startsWith("git:")) {
+      const fetched = fetchGitSpec(filePath, options.cwd);
+      abs = fetched.localPath;
+      text = fetched.text;
+      tmpDirToClean = path2.dirname(fetched.localPath);
+    } else {
+      abs = path2.resolve(filePath);
+      try {
+        text = fs2.readFileSync(abs, "utf8");
+      } catch (e) {
+        throw new SpecLoadError(`${filePath}: cannot read file: ${errorMessage(e)}`);
+      }
+    }
+    if (text.trim() === "") {
+      throw new SpecLoadError(
+        `${filePath}: file is empty \u2014 a spec must contain an OpenAPI document`
+      );
+    }
+    const parsed = parseSpecText(text, filePath);
+    const openapi = typeof parsed.openapi === "string" ? parsed.openapi : "";
+    if (!openapi) {
+      throw new SpecLoadError(
+        `${filePath}: missing 'openapi' version field \u2014 this does not look like an OpenAPI 3.x document`
+      );
+    }
+    if (!openapi.startsWith("3.")) {
+      throw new SpecLoadError(
+        `${filePath}: unsupported OpenAPI version "${openapi}" \u2014 API Guard supports 3.0.x and 3.1.x only`
+      );
+    }
+    const specDir = path2.dirname(abs);
+    const allowRemote = options.loader?.allowRemoteRefs ?? false;
+    const allowExternal = options.loader?.allowExternalFiles ?? false;
+    const remoteRefs = findRemoteRefs(parsed);
+    if (remoteRefs.length > 0 && !allowRemote) {
+      throw new SpecLoadError(
+        `${filePath}: remote $ref(s) denied by default (found ${remoteRefs.length}: ${remoteRefs.slice(0, 3).join(", ")}${remoteRefs.length > 3 ? ", \u2026" : ""}). Set loader.allow-remote-refs: true in apiguard.yaml to opt in.`
+      );
+    }
+    const externalRefs = findExternalFileRefs(parsed, specDir);
+    if (externalRefs.length > 0 && !allowExternal) {
+      throw new SpecLoadError(
+        `${filePath}: $ref(s) point outside the spec's directory (found ${externalRefs.length}: ${externalRefs.slice(0, 3).join(", ")}${externalRefs.length > 3 ? ", \u2026" : ""}). External-file refs are not supported in v1.`
+      );
+    }
+    let document;
+    try {
+      document = await SwaggerParser.bundle(abs);
+    } catch (e) {
+      throw new SpecLoadError(`${filePath}: parser error: ${errorMessage(e)}`);
+    }
+    const info = parsed.info ?? {};
+    const title = typeof info.title === "string" ? info.title : "";
+    const loaded = {
+      document,
+      source: filePath,
+      openapiVersion: openapi,
+      title,
+      sha256: "",
+      rawText: text
+    };
+    return toNormalizedSpec(loaded, normalizeDocument(document));
+  } finally {
+    if (tmpDirToClean) {
+      try {
+        fs2.rmSync(tmpDirToClean, { recursive: true, force: true });
+      } catch {
+      }
+    }
+  }
+}
+
+// src/loaders/validate.ts
+function asObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? v : void 0;
+}
+function asRecordArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x) => x !== null && typeof x === "object" && !Array.isArray(x));
+}
+function validateSemantics(document, file) {
+  const issues = [];
+  const doc = asObject(document);
+  if (!doc)
+    return { issues: [{ level: "error", file, message: "document is not an object" }], ok: false };
+  const schemes = asObject(doc.components)?.securitySchemes;
+  const schemeNames = new Set(schemes ? Object.keys(schemes) : []);
+  const checkRequirements = (reqs, where) => {
+    for (const req of asRecordArray(reqs)) {
+      for (const name of Object.keys(req)) {
+        if (!schemeNames.has(name)) {
+          issues.push({
+            level: "error",
+            file,
+            message: `${where}: security requirement references unknown scheme "${name}"`
+          });
+        }
+      }
+    }
+  };
+  checkRequirements(doc.security, "#/");
+  const paths = asObject(doc.paths) ?? {};
+  for (const [p, item] of Object.entries(paths)) {
+    const pathItem = asObject(item);
+    if (!pathItem) continue;
+    checkRequirements(pathItem.security, `${p} (path-level)`);
+    for (const method of Object.keys(pathItem)) {
+      if (!isHttpMethod(method)) continue;
+      const op = asObject(pathItem[method]);
+      if (!op) continue;
+      checkRequirements(op.security, `${p} ${method.toUpperCase()}`);
+    }
+  }
+  const seenIds = /* @__PURE__ */ new Map();
+  for (const [p, item] of Object.entries(paths)) {
+    const pathItem = asObject(item);
+    if (!pathItem) continue;
+    for (const method of Object.keys(pathItem)) {
+      if (!isHttpMethod(method)) continue;
+      const op = asObject(pathItem[method]);
+      const opId = op?.operationId;
+      if (typeof opId === "string" && opId.length > 0) {
+        const prev = seenIds.get(opId);
+        if (prev !== void 0) {
+          issues.push({
+            level: "warning",
+            file,
+            message: `duplicate operationId "${opId}" (also at ${prev})`
+          });
+        } else {
+          seenIds.set(opId, `${p} ${method.toUpperCase()}`);
+        }
+      }
+    }
+  }
+  for (const [p, item] of Object.entries(paths)) {
+    const pathItem = asObject(item);
+    if (!pathItem) {
+      issues.push({ level: "warning", file, message: `${p}: path item is empty` });
+      continue;
+    }
+    const hasOp = Object.keys(pathItem).some((k) => isHttpMethod(k));
+    if (!hasOp) {
+      issues.push({ level: "warning", file, message: `${p}: path item has no operations` });
+    }
+    for (const method of Object.keys(pathItem)) {
+      if (!isHttpMethod(method)) continue;
+      const op = asObject(pathItem[method]);
+      if (!op) continue;
+      const where = `${p} ${method.toUpperCase()}`;
+      const responses = asObject(op.responses);
+      if (responses) {
+        for (const key of Object.keys(responses)) {
+          if (!/^(default|[1-5](\d{2}|XX))$/.test(key)) {
+            issues.push({
+              level: "error",
+              file,
+              message: `${where}: invalid response status key "${key}" (expected 1XX-5XX, code, or "default")`
+            });
+          }
+        }
+      }
+      for (const param of asRecordArray(op.parameters)) {
+        checkParameterShape(param, where, issues, file);
+      }
+      for (const param of asRecordArray(pathItem.parameters)) {
+        checkParameterShape(param, `${p} (path-level)`, issues, file);
+      }
+    }
+  }
+  const schemas = asObject(doc.components)?.schemas;
+  for (const [name, schema] of Object.entries(schemas ?? {})) {
+    const obj = asObject(schema);
+    if (!obj) continue;
+    const props = asObject(obj.properties);
+    for (const req of stringArray(obj.required)) {
+      if (props && !(req in props)) {
+        issues.push({
+          level: "warning",
+          file,
+          message: `components.schemas.${name}: required entry "${req}" is not a declared property`
+        });
+      }
+    }
+  }
+  return { issues, ok: !issues.some((i) => i.level === "error") };
+}
+function checkParameterShape(param, where, issues, file) {
+  const name = typeof param.name === "string" ? param.name : "<unnamed>";
+  if ("schema" in param && "content" in param) {
+    issues.push({
+      level: "error",
+      file,
+      message: `${where}: parameter "${name}" has both 'schema' and 'content' (mutually exclusive)`
+    });
+  }
+}
+function stringArray(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function isHttpMethod(key) {
+  return ["get", "post", "put", "patch", "delete", "head", "options", "trace"].includes(
+    key.toLowerCase()
+  );
+}
+function formatIssues(issues) {
+  const errors = issues.filter((i) => i.level === "error");
+  const warnings = issues.filter((i) => i.level === "warning");
+  const lines = [];
+  if (errors.length > 0) {
+    lines.push("Errors:");
+    for (const i of errors) lines.push(`  ${i.file}: ${i.message}`);
+  }
+  if (warnings.length > 0) {
+    lines.push("Warnings:");
+    for (const i of warnings) lines.push(`  ${i.file}: ${i.message}`);
+  }
+  return lines;
+}
+
+// src/core/versioning/semver-advisor.ts
+function suggestVersion(changes) {
+  const errors = changes.filter((c) => c.severity === "error");
+  if (errors.length > 0) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const c of errors) counts.set(c.ruleId, (counts.get(c.ruleId) ?? 0) + 1);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3).map(([id, n]) => `${id}(${n})`);
+    return {
+      bump: "major",
+      reason: `${errors.length} breaking change(s); driven by ${top.join(", ")}`,
+      triggers: [...new Set(errors.map((c) => c.ruleId))].sort()
+    };
+  }
+  const minorish = changes.filter(
+    (c) => c.severity === "warning" || c.kind === "addition" || c.kind === "removal" || c.kind === "modification"
+  );
+  if (minorish.length > 0) {
+    const triggers = [...new Set(minorish.map((c) => c.ruleId))].sort();
+    return {
+      bump: "minor",
+      reason: `${minorish.length} non-breaking functional change(s) (additions/modifications/warnings)`,
+      triggers
+    };
+  }
+  const patchish = changes.filter((c) => c.kind === "relaxation" || c.kind === "documentation");
+  if (patchish.length > 0) {
+    const triggers = [...new Set(patchish.map((c) => c.ruleId))].sort();
+    return {
+      bump: "patch",
+      reason: `${patchish.length} documentation/relaxation change(s)`,
+      triggers
+    };
+  }
+  return { bump: "none", reason: "no changes", triggers: [] };
+}
+
+// src/core/models/report.ts
+var TOOL_VERSION = "0.1.0";
+
+// src/core/rules/rule-registry.ts
+function fmt(v) {
+  if (v === void 0) return "absent";
+  if (typeof v === "string") return `\`${v}\``;
+  if (v === null) return "null";
+  return `\`${JSON.stringify(v)}\``;
+}
+function sideLabel(loc) {
+  switch (loc.context) {
+    case "request-body":
+      return "Request property";
+    case "response-body":
+      return "Response property";
+    case "request-header":
+      return "Request header";
+    case "response-header":
+      return "Response header";
+    case "parameter":
+      return "Parameter";
+    case "component":
+      return "Component property";
+    case "callback":
+      return "Callback payload property";
+    case "webhook":
+      return "Webhook payload property";
+    default:
+      return "Property";
+  }
+}
+function whereLabel(loc) {
+  switch (loc.context) {
+    case "component":
+      return loc.componentName ? ` in component ${loc.componentName}` : " in component";
+    case "parameter":
+      return " parameter";
+    default:
+      return "";
+  }
+}
+function nameOf(ctx) {
+  const source = ctx.location.pointerNew || ctx.location.pointerOld;
+  const tokens = source.split("/").filter(Boolean);
+  const last = tokens[tokens.length - 1];
+  return (last ?? "value").replace(/~1/g, "/").replace(/~0/g, "~");
+}
+var RULES = [
+  // ---------------- §10.1 API / document level ----------------
+  {
+    id: "openapi-version-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "The `openapi` version field changed (after normalization).",
+    message: (c) => `OpenAPI version changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "verify tooling supports the new OpenAPI version"
+  },
+  {
+    id: "title-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "The document title changed.",
+    message: (c) => `API title changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update generated clients/docs that embed the title"
+  },
+  {
+    id: "description-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "The document description changed.",
+    message: (c) => `API description changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "no functional impact; update dependent docs if desired"
+  },
+  {
+    id: "server-url-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["api"],
+    trigger: "A server URL was added (treated as additive in v1).",
+    message: (c) => `Server URL added: ${fmt(c.newValue)}`,
+    suggestion: () => "clients can now target the new server; no action required"
+  },
+  {
+    id: "server-url-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["api"],
+    trigger: "A server URL was removed (clients may still target it).",
+    message: (c) => `Server URL removed: ${fmt(c.oldValue)}`,
+    suggestion: () => "publish a migration note; clients pinned to this URL will fail"
+  },
+  {
+    id: "server-metadata-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "Server description or variables changed.",
+    message: (c) => `Server metadata changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "review server variable defaults for environment impact"
+  },
+  {
+    id: "external-docs-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "externalDocs changed.",
+    message: (c) => `External docs changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update bookmarks/links to external documentation"
+  },
+  {
+    id: "license-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "License metadata changed.",
+    message: (c) => `License changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "review licensing implications before publishing"
+  },
+  {
+    id: "contact-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["api"],
+    trigger: "Contact metadata changed.",
+    message: (c) => `Contact changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update support contacts in client tooling"
+  },
+  // ---------------- §10.2 Operation level ----------------
+  {
+    id: "operation-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["operation"],
+    trigger: "A new path+method was added.",
+    message: (c) => `Operation added: ${String(c.location.method ?? "").toUpperCase()} ${c.location.path}`,
+    suggestion: () => "additive; regenerate clients to expose the new operation"
+  },
+  {
+    id: "removed-method",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["operation"],
+    trigger: "The path still exists but a method disappeared.",
+    message: (c) => `Operation removed: ${String(c.location.method ?? "").toUpperCase()} ${c.location.path}`,
+    suggestion: () => "clients calling this operation will get 404/405; version the API instead"
+  },
+  {
+    id: "removed-path",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["operation"],
+    trigger: "An entire path disappeared (reported once instead of per-method rows).",
+    message: (c) => `Path removed: ${c.location.path} (all operations)`,
+    suggestion: () => "clients using any operation under this path will break; version the API"
+  },
+  {
+    id: "operation-id-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["operation"],
+    trigger: "operationId changed (SDK/client code impact).",
+    message: (c) => `operationId changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "regenerate SDKs; code referencing the old method name must be updated"
+  },
+  {
+    id: "operation-deprecated-added",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["operation"],
+    trigger: "`deprecated: true` was added to an operation.",
+    message: () => "Operation is now deprecated",
+    suggestion: () => "plan migration before the deprecation window ends"
+  },
+  {
+    id: "operation-deprecated-removed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["operation"],
+    trigger: "Deprecation was removed from an operation.",
+    message: () => "Operation deprecation removed",
+    suggestion: () => "update client roadmaps that tracked this deprecation"
+  },
+  {
+    id: "operation-tags-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["operation"],
+    trigger: "The operation tag list changed in either direction.",
+    message: (c) => `Operation tags changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update client grouping/filtering that relies on tags"
+  },
+  {
+    id: "operation-summary-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["operation"],
+    trigger: "The operation summary changed.",
+    message: (c) => `Operation summary changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "documentation-only change"
+  },
+  {
+    id: "operation-description-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["operation"],
+    trigger: "The operation description changed.",
+    message: (c) => `Operation description changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "documentation-only change"
+  },
+  {
+    id: "callback-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["operation"],
+    trigger: "A new callback was added (OpenAPI 3.0/3.1).",
+    message: (c) => `Callback added: ${fmt(c.newValue)}`,
+    suggestion: () => "additive; implement the new callback when ready"
+  },
+  {
+    id: "callback-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["operation"],
+    trigger: "A callback was removed.",
+    message: (c) => `Callback removed: ${fmt(c.oldValue)}`,
+    suggestion: () => "consumers relying on this callback will stop receiving events"
+  },
+  {
+    id: "webhook-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["webhook"],
+    trigger: "A new top-level webhook was added (OpenAPI 3.1).",
+    message: (c) => `Webhook added: ${fmt(c.newValue)}`,
+    suggestion: () => "additive; subscribe to the new webhook when ready"
+  },
+  {
+    id: "webhook-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["webhook"],
+    trigger: "A top-level webhook was removed (OpenAPI 3.1).",
+    message: (c) => `Webhook removed: ${fmt(c.oldValue)}`,
+    suggestion: () => "consumers listening for this webhook will break"
+  },
+  // ---------------- §10.3 Parameters and bodies ----------------
+  {
+    id: "parameter-added-required",
+    defaultSeverity: "error",
+    defaultKind: "addition",
+    contexts: ["parameter"],
+    trigger: "A new required header/query/cookie/path parameter was added.",
+    message: (c) => `Required parameter \`${nameOf(c)}\` added`,
+    suggestion: (c) => `clients must now send \`${nameOf(c)}\` on every request`
+  },
+  {
+    id: "parameter-added-optional",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["parameter"],
+    trigger: "A new optional parameter was added.",
+    message: (c) => `Optional parameter \`${nameOf(c)}\` added`,
+    suggestion: () => "additive; clients can adopt the parameter when ready"
+  },
+  {
+    id: "removed-parameter",
+    defaultSeverity: "warning",
+    defaultKind: "removal",
+    contexts: ["parameter", "request-header"],
+    trigger: "A parameter was removed; error when it was required, a header, or a path param \u2014 else warning (\xA710.5).",
+    message: (c) => `Parameter \`${nameOf(c)}\` removed`,
+    suggestion: (c) => `stop sending \`${nameOf(c)}\`; servers will ignore unknown parameters`
+  },
+  {
+    id: "parameter-made-required",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "An optional parameter became required.",
+    message: (c) => `Parameter \`${nameOf(c)}\` changed from optional to required`,
+    suggestion: (c) => `clients must now provide \`${nameOf(c)}\` on every request`
+  },
+  {
+    id: "parameter-type-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "A parameter schema type changed.",
+    message: (c) => `Parameter \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update clients to send the new type; old payloads will be rejected"
+  },
+  {
+    id: "parameter-format-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "A parameter format changed.",
+    message: (c) => `Parameter \`${nameOf(c)}\` format changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "formats are advisory but commonly validated; verify client payloads"
+  },
+  {
+    id: "parameter-location-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "A parameter moved between in: query/header/path/cookie (same name).",
+    message: (c) => `Parameter \`${nameOf(c)}\` moved from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "clients must send the value in the new location"
+  },
+  {
+    id: "parameter-style-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "A parameter style/explode changed.",
+    message: (c) => `Parameter \`${nameOf(c)}\` style changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update serialization of array/object parameters in clients"
+  },
+  {
+    id: "parameter-default-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["parameter"],
+    trigger: "A parameter default changed (server-side behavior may differ).",
+    message: (c) => `Parameter \`${nameOf(c)}\` default changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "verify clients that relied on the previous default behavior"
+  },
+  {
+    id: "parameter-metadata-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["parameter"],
+    trigger: "description/example/deprecated changed on a parameter.",
+    message: (c) => `Parameter \`${nameOf(c)}\` metadata changed`,
+    suggestion: () => "documentation-only change"
+  },
+  {
+    id: "request-body-removed",
+    defaultSeverity: "warning",
+    defaultKind: "removal",
+    contexts: ["request-body"],
+    trigger: "The request body existed and is gone; error if the old body was required (\xA710.5).",
+    message: () => "Request body removed",
+    suggestion: () => "clients must stop sending a body; verify server tolerance"
+  },
+  {
+    id: "request-body-added-required",
+    defaultSeverity: "error",
+    defaultKind: "addition",
+    contexts: ["request-body"],
+    trigger: "No body before; a body with `required: true` now.",
+    message: () => "Required request body added",
+    suggestion: () => "clients must now send a body on every request"
+  },
+  {
+    id: "request-body-added-optional",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["request-body"],
+    trigger: "An optional request body was added.",
+    message: () => "Optional request body added",
+    suggestion: () => "additive; clients can send the body when ready"
+  },
+  {
+    id: "request-body-required-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body"],
+    trigger: "An optional body became `required: true`.",
+    message: () => "Request body changed from optional to required",
+    suggestion: () => "clients must now send the body on every request"
+  },
+  {
+    id: "content-type-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["request-body", "response-body"],
+    trigger: "A previously supported media type was removed (request or response).",
+    message: (c) => `Media type ${fmt(c.oldValue)} removed from ${c.location.context === "request-body" ? "request" : "response"}`,
+    suggestion: () => "clients sending/accepting this media type will fail content negotiation"
+  },
+  {
+    id: "content-type-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["request-body", "response-body"],
+    trigger: "A media type was added.",
+    message: (c) => `Media type ${fmt(c.newValue)} added to ${c.location.context === "request-body" ? "request" : "response"}`,
+    suggestion: () => "additive; adopt when ready"
+  },
+  {
+    id: "encoding-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["request-body"],
+    trigger: "multipart/form-data encoding properties changed.",
+    message: (c) => `Multipart encoding changed for ${fmt(c.oldValue)} \u2192 ${fmt(c.newValue)}`,
+    suggestion: () => "verify multipart part serialization in clients"
+  },
+  {
+    id: "response-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["response-body"],
+    trigger: "A new status code (or `default` when none existed) was added.",
+    message: (c) => `Response ${fmt(c.newValue)} added`,
+    suggestion: () => "additive; handle the new status in clients when ready"
+  },
+  {
+    id: "response-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["response-body"],
+    trigger: "A declared status code was removed.",
+    message: (c) => `Response ${fmt(c.oldValue)} removed`,
+    suggestion: () => "clients expecting this status will treat it as unexpected; update error handling"
+  },
+  {
+    id: "default-response-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["response-body"],
+    trigger: "The `default` response was removed while it existed.",
+    message: () => "Default response removed",
+    suggestion: () => "clients relying on the default error contract lose their fallback schema"
+  },
+  {
+    id: "response-header-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["response-header"],
+    trigger: "A response header was removed.",
+    message: (c) => `Response header \`${nameOf(c)}\` removed`,
+    suggestion: () => "clients reading this header will see it missing; update parsing"
+  },
+  {
+    id: "response-header-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["response-header"],
+    trigger: "A response header was added.",
+    message: (c) => `Response header \`${nameOf(c)}\` added`,
+    suggestion: () => "additive; parse the header when ready"
+  },
+  {
+    id: "request-header-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["request-header"],
+    trigger: "A property inside a header parameter schema disappeared (\xA710.3).",
+    message: (c) => `Request header schema property \`${nameOf(c)}\` removed`,
+    suggestion: () => "stop sending this header property; verify server acceptance"
+  },
+  // ---------------- §10.4 Schema / property level ----------------
+  {
+    id: "property-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "A new property that is NOT required was added.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` added${whereLabel(c.location)}`,
+    suggestion: () => "additive; clients can consume the new field when ready"
+  },
+  {
+    id: "required-property-added",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "A property is newly present and required, or an optional property became required (\xA710.5).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` changed from optional to required`,
+    suggestion: (c) => `clients must now provide \`${nameOf(c)}\``
+  },
+  {
+    id: "property-removed",
+    defaultSeverity: "warning",
+    defaultKind: "removal",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "A property was removed; severity resolves per the \xA710.5 context table.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` was removed${whereLabel(c.location)}`,
+    suggestion: (c) => `stop relying on \`${nameOf(c)}\`${c.location.context === "response-body" ? "; it will no longer be returned" : ""}`
+  },
+  {
+    id: "property-type-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "A schema type changed (including array item type via pointer to items).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update serializers/deserializers for the new type"
+  },
+  {
+    id: "property-format-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "A schema format changed (advisory; pair with type change for error).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` format changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "verify validation libraries that enforce the format"
+  },
+  {
+    id: "property-default-changed",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A schema default changed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` default changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "verify clients that relied on the previous default"
+  },
+  {
+    id: "enum-value-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "An enum member was removed (anywhere).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` enum value ${fmt(c.oldValue)} removed`,
+    suggestion: () => "stop sending/expecting the removed enum value; update switch statements"
+  },
+  {
+    id: "enum-value-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: [
+      "request-body",
+      "response-body",
+      "parameter",
+      "component",
+      "callback",
+      "webhook",
+      "request-header",
+      "response-header"
+    ],
+    trigger: "An enum member was added.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` enum value ${fmt(c.newValue)} added`,
+    suggestion: () => "handle the new enum value in client logic"
+  },
+  {
+    id: "const-added",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "`const` was introduced where none existed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` must now be exactly ${fmt(c.newValue)}`,
+    suggestion: () => "clients sending other values will be rejected"
+  },
+  {
+    id: "const-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A `const` value changed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` const changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "update clients to the new constant value"
+  },
+  {
+    id: "const-removed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A `const` constraint was removed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` const constraint removed`,
+    suggestion: () => "relaxation; no client action required"
+  },
+  {
+    id: "constraint-added",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A restrictive constraint was introduced where none existed (pattern, minLength, minItems, min/max, exclusive*, multipleOf).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` now requires ${constraintText(c)}`,
+    suggestion: () => "update clients to satisfy the new constraint"
+  },
+  {
+    id: "constraint-tightened",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "An existing constraint was made stricter (numeric compare after normalization).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint tightened: ${constraintText(c)}`,
+    suggestion: () => "previously-valid payloads may now be rejected; update clients"
+  },
+  {
+    id: "constraint-relaxed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A constraint was loosened.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint relaxed: ${constraintText(c)}`,
+    suggestion: () => "relaxation; no client action required"
+  },
+  {
+    id: "constraint-removed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A constraint was deleted.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` constraint ${constraintText(c)} removed`,
+    suggestion: () => "relaxation; no client action required"
+  },
+  {
+    id: "required-removed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A property was removed from the `required` array (either context).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` is no longer required`,
+    suggestion: () => "relaxation; clients may omit the field"
+  },
+  {
+    id: "map-closed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "`additionalProperties` became false or a schema where previously true/absent.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` no longer allows unknown properties`,
+    suggestion: () => "clients sending extra fields will be rejected"
+  },
+  {
+    id: "map-opened",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "`additionalProperties` became true/absent where it was false or a schema.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` now allows unknown properties`,
+    suggestion: () => "relaxation; no client action required"
+  },
+  {
+    id: "allOf-member-added",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A new allOf member was added (may restrict or conflict).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` gained an allOf constraint`,
+    suggestion: () => "verify payloads still satisfy the combined schema"
+  },
+  {
+    id: "allOf-member-removed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "An allOf member was removed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` lost an allOf constraint`,
+    suggestion: () => "relaxation; no client action required"
+  },
+  {
+    id: "anyOf-oneOf-member-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A new anyOf/oneOf alternative branch was added.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` gained an alternative schema`,
+    suggestion: () => "additive; clients can use the new branch when ready"
+  },
+  {
+    id: "anyOf-oneOf-member-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "An anyOf/oneOf alternative was removed (payloads matching only that branch break).",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` lost an alternative schema`,
+    suggestion: () => "payloads matching only the removed branch will fail validation"
+  },
+  {
+    id: "discriminator-added",
+    defaultSeverity: "warning",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A discriminator was introduced.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` now requires a discriminator`,
+    suggestion: () => "clients must include the discriminator field in polymorphic payloads"
+  },
+  {
+    id: "discriminator-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "The discriminator property or mapping changed/removed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` discriminator changed`,
+    suggestion: () => "update polymorphic deserialization to the new discriminator"
+  },
+  {
+    id: "schema-description-changed",
+    defaultSeverity: "info",
+    defaultKind: "documentation",
+    contexts: ["request-body", "response-body", "parameter", "component", "callback", "webhook"],
+    trigger: "A schema-level description/title/example changed.",
+    message: (c) => `${sideLabel(c.location)} \`${nameOf(c)}\` documentation changed`,
+    suggestion: () => "documentation-only change"
+  },
+  // ---------------- §10.6 Security ----------------
+  {
+    id: "security-scheme-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["security"],
+    trigger: "A new scheme was added to components.securitySchemes.",
+    message: (c) => `Security scheme ${fmt(c.newValue)} added`,
+    suggestion: () => "additive; adopt the new scheme when ready"
+  },
+  {
+    id: "security-scheme-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["security"],
+    trigger: "A scheme was removed and is still referenced by \u22651 requirement; else info.",
+    message: (c) => `Security scheme ${fmt(c.oldValue)} removed`,
+    suggestion: () => "clients authenticating with this scheme will fail; migrate first"
+  },
+  {
+    id: "security-type-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["security"],
+    trigger: "A scheme type changed (http/apiKey/oauth2/openIdConnect/mutualTLS).",
+    message: (c) => `Security scheme \`${nameOf(c)}\` type changed from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "client credentials/flows for the old type will fail"
+  },
+  {
+    id: "api-key-location-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["security"],
+    trigger: "An apiKey scheme in: header/query/cookie changed.",
+    message: (c) => `API key \`${nameOf(c)}\` moved from ${fmt(c.oldValue)} to ${fmt(c.newValue)}`,
+    suggestion: () => "clients must send the key in the new location"
+  },
+  {
+    id: "oauth-scope-removed",
+    defaultSeverity: "error",
+    defaultKind: "removal",
+    contexts: ["security"],
+    trigger: "A scope was removed from a scheme that \u22651 operation requirement references; else info.",
+    message: (c) => `OAuth scope \`${nameOf(c)}\` removed`,
+    suggestion: () => "tokens granted only the removed scope will fail authorization"
+  },
+  {
+    id: "oauth-scope-added",
+    defaultSeverity: "info",
+    defaultKind: "addition",
+    contexts: ["security"],
+    trigger: "A scope was added to a scheme.",
+    message: (c) => `OAuth scope \`${nameOf(c)}\` added`,
+    suggestion: () => "additive; request the new scope when needed"
+  },
+  {
+    id: "security-requirement-added",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["security"],
+    trigger: "An operation with no/optional security now requires security.",
+    message: (c) => `Operation ${c.location.path} now requires authentication`,
+    suggestion: () => "previously-anonymous clients must obtain credentials"
+  },
+  {
+    id: "security-requirement-changed",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["security"],
+    trigger: "The scheme set changed with no overlap (old credentials fail).",
+    message: (c) => `Operation ${c.location.path} security requirements changed incompatibly`,
+    suggestion: () => "clients must obtain credentials for the new scheme(s)"
+  },
+  {
+    id: "security-scope-required-added",
+    defaultSeverity: "error",
+    defaultKind: "modification",
+    contexts: ["security"],
+    trigger: "An operation requirement now demands a scope not previously required.",
+    message: (c) => `Operation ${c.location.path} now requires scope \`${String(c.newValue ?? "")}\``,
+    suggestion: () => "clients must request the additional scope from the authorization server"
+  },
+  {
+    id: "security-requirement-removed",
+    defaultSeverity: "warning",
+    defaultKind: "relaxation",
+    contexts: ["security"],
+    trigger: "Operation-level security was removed entirely (exposure risk \u2192 warning).",
+    message: (c) => `Operation ${c.location.path} no longer requires authentication`,
+    suggestion: () => "review exposure: the operation is now reachable anonymously"
+  },
+  {
+    id: "security-scope-required-removed",
+    defaultSeverity: "info",
+    defaultKind: "relaxation",
+    contexts: ["security"],
+    trigger: "A narrower scope set is now accepted.",
+    message: (c) => `Operation ${c.location.path} no longer requires scope \`${String(c.oldValue ?? "")}\``,
+    suggestion: () => "relaxation; existing tokens keep working"
+  }
+];
+function getRule(id) {
+  const rule = RULES.find((r) => r.id === id);
+  if (!rule) throw new Error(`internal error: unknown rule id "${id}"`);
+  return rule;
+}
+function getAllRules() {
+  return [...RULES];
+}
+function constraintText(c) {
+  const name = nameOf(c);
+  const oldV = c.oldValue === void 0 ? void 0 : JSON.stringify(c.oldValue);
+  const newV = c.newValue === void 0 ? void 0 : JSON.stringify(c.newValue);
+  if (oldV !== void 0 && newV !== void 0) return `${name}: ${oldV} \u2192 ${newV}`;
+  if (newV !== void 0) return `${name}: ${newV}`;
+  return name;
+}
+
+// src/core/engine/classify.ts
+function sideClassOf(context) {
+  switch (context) {
+    case "request-body":
+    case "request-header":
+    case "parameter":
+      return "send";
+    case "response-body":
+    case "response-header":
+    case "callback":
+    case "webhook":
+      return "parse";
+    case "component":
+      return "parse";
+    default:
+      return "parse";
+  }
+}
+function parseRuleKey(key) {
+  const at = key.indexOf("@");
+  if (at === -1) return { ruleId: key };
+  return { ruleId: key.slice(0, at), context: key.slice(at + 1) };
+}
+function resolveContextSeverity(ruleId, context, opts) {
+  const side = opts.sideClass ?? sideClassOf(context);
+  if (ruleId === "property-removed") {
+    if (side === "parse") return "error";
+    if (context === "request-header") return "error";
+    if (context === "parameter") return "error";
+    return opts.wasRequired ? "error" : "warning";
+  }
+  if (ruleId === "required-property-added") {
+    if (side === "parse") return "info";
+    return "error";
+  }
+  if (ruleId === "request-body-removed") {
+    return opts.wasRequired ? "error" : "warning";
+  }
+  if (ruleId === "removed-parameter") {
+    return opts.wasRequired ? "error" : "warning";
+  }
+  if (ruleId === "constraint-relaxed" || ruleId === "constraint-removed") {
+    return side === "parse" ? "error" : "info";
+  }
+  if (ruleId === "constraint-tightened" || ruleId === "constraint-added") {
+    return side === "parse" ? "info" : "error";
+  }
+  return getRule(ruleId).defaultSeverity;
+}
+function classify(ruleId, context, options, doctrine) {
+  const rule = getRule(ruleId);
+  let override;
+  for (const [key, value] of Object.entries(options.rules)) {
+    const parsed = parseRuleKey(key);
+    if (parsed.ruleId !== ruleId) continue;
+    if (parsed.context !== void 0 && parsed.context === context) override = value;
+    else if (parsed.context === void 0 && override === void 0) override = value;
+  }
+  if (override === "off") return null;
+  const DOCTRINE_RULES = /* @__PURE__ */ new Set([
+    "property-removed",
+    "required-property-added",
+    "request-body-removed",
+    "removed-parameter",
+    "constraint-relaxed",
+    "constraint-removed",
+    "constraint-tightened",
+    "constraint-added"
+  ]);
+  let baseSeverity = DOCTRINE_RULES.has(ruleId) ? resolveContextSeverity(ruleId, context, doctrine ?? {}) : rule.defaultSeverity;
+  if (override === void 0 && options.profile) {
+    if (options.profile === "strict-sdk") {
+      if (ruleId === "enum-value-added") {
+        baseSeverity = "error";
+      } else if (ruleId === "anyOf-oneOf-member-added") {
+        baseSeverity = "warning";
+      }
+    } else if (options.profile === "loose-web") {
+      if (ruleId === "enum-value-added") {
+        baseSeverity = "info";
+      }
+    }
+  }
+  const severity = override ?? baseSeverity;
+  return { severity, kind: rule.defaultKind };
+}
+
+// src/utils/sort.ts
+var SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
+var METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];
+var METHOD_RANK = {};
+for (const [i, m] of METHOD_ORDER.entries()) METHOD_RANK[m] = i;
+function methodRank(method) {
+  if (!method) return METHOD_ORDER.length;
+  const r = METHOD_RANK[method.toUpperCase()];
+  return r ?? METHOD_ORDER.length + 1;
+}
+function compareChanges(a, b) {
+  const sev = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+  if (sev !== 0) return sev;
+  const path4 = (a.location.path ?? "").localeCompare(b.location.path ?? "", "en", {
+    sensitivity: "variant"
+  });
+  if (path4 !== 0) return path4;
+  const meth = methodRank(a.location.method) - methodRank(b.location.method);
+  if (meth !== 0) return meth;
+  const po = a.location.pointerOld.localeCompare(b.location.pointerOld, "en", {
+    sensitivity: "variant"
+  });
+  if (po !== 0) return po;
+  const pn = a.location.pointerNew.localeCompare(b.location.pointerNew, "en", {
+    sensitivity: "variant"
+  });
+  if (pn !== 0) return pn;
+  const rule = a.ruleId.localeCompare(b.ruleId, "en", { sensitivity: "variant" });
+  if (rule !== 0) return rule;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+function sortChanges(changes) {
+  changes.sort(compareChanges);
+  return changes;
+}
+function dedupeChanges(changes) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const c of changes) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push(c);
+  }
+  return out;
+}
+function escapePointerToken(token) {
+  return token.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+function pointerJoin(...tokens) {
+  return `#/${tokens.map((t) => escapePointerToken(String(t))).join("/")}`;
+}
+
+// src/core/engine/index-build.ts
+function asObject2(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? v : void 0;
+}
+function buildSpecIndex(document) {
+  const doc = asObject2(document) ?? {};
+  const pathsObj = asObject2(doc.paths) ?? {};
+  const paths = Object.keys(pathsObj).sort();
+  const pathItems = /* @__PURE__ */ new Map();
+  const operations = [];
+  for (const p of paths) {
+    const item = asObject2(pathsObj[p]);
+    if (!item) continue;
+    pathItems.set(p, item);
+    const methods = Object.keys(item).filter((k) => isHttpMethod(k)).sort((a, b) => (METHOD_RANK[a.toUpperCase()] ?? 99) - (METHOD_RANK[b.toUpperCase()] ?? 99));
+    for (const m of methods) {
+      const op = asObject2(item[m]);
+      if (!op) continue;
+      operations.push({ path: p, method: m.toUpperCase(), operation: op, pathItem: item });
+    }
+  }
+  const components = asObject2(doc.components) ?? {};
+  const schemasObj = asObject2(components.schemas) ?? {};
+  const schemas = /* @__PURE__ */ new Map();
+  for (const [name, schema] of Object.entries(schemasObj)) {
+    const obj = asObject2(schema);
+    if (obj) schemas.set(name, obj);
+  }
+  const webhooksObj = asObject2(doc.webhooks) ?? {};
+  const webhooks = /* @__PURE__ */ new Map();
+  for (const [name, wh] of Object.entries(webhooksObj)) {
+    const obj = asObject2(wh);
+    if (obj) webhooks.set(name, obj);
+  }
+  return { paths, pathItems, operations, schemas, webhooks };
+}
+function mergedParameters(pathItem, operation) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const opParams = paramList(operation.parameters);
+  for (const p of opParams) {
+    const key = paramKey(p);
+    seen.add(key);
+    out.push(p);
+  }
+  for (const p of paramList(pathItem.parameters)) {
+    const key = paramKey(p);
+    if (!seen.has(key)) out.push(p);
+  }
+  return out;
+}
+function paramList(v) {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x) => x !== null && typeof x === "object" && !Array.isArray(x));
+}
+function paramKey(p) {
+  const name = typeof p.name === "string" ? p.name : "";
+  const loc = typeof p.in === "string" ? p.in : "";
+  return `${name}::${loc}`;
+}
+
+// src/core/engine/comparator.ts
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null || typeof a !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  const ao = a;
+  const bo = b;
+  const ak = Object.keys(ao).sort();
+  const bk = Object.keys(bo).sort();
+  if (ak.length !== bk.length) return false;
+  if (!ak.every((k, i) => k === bk[i])) return false;
+  return ak.every((k) => deepEqual(ao[k], bo[k]));
+}
+function typeLabel(t) {
+  if (typeof t === "string") return t;
+  if (Array.isArray(t)) return t.join("|");
+  return JSON.stringify(t) ?? "unknown";
+}
+function isObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
+}
+function boundDirection(kind, oldV, newV) {
+  if (oldV === void 0 && newV === void 0) return "same";
+  if (oldV === newV) return "same";
+  if (oldV === void 0)
+    return newV === void 0 ? "same" : kind === "lower" ? "tightened" : "tightened";
+  if (newV === void 0) return "relaxed";
+  if (oldV === newV) return "same";
+  if (kind === "lower") return newV > oldV ? "tightened" : "relaxed";
+  return newV < oldV ? "tightened" : "relaxed";
+}
+var LOWER_BOUNDS = ["minimum", "minLength", "minItems"];
+
+// src/core/engine/walker.ts
+function escape(token) {
+  return token.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+function unescape(token) {
+  return token.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+var REF = "$ref";
+var MAX_DEREF_DEPTH = 256;
+function isObj(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+function structuralDeref(root) {
+  const components = root.components;
+  if (!isObj(components)) return;
+  const schemasMap = components.schemas;
+  if (!isObj(schemasMap)) return;
+  const schemas = schemasMap;
+  const resolved = /* @__PURE__ */ new Map();
+  const inProgress = /* @__PURE__ */ new Set();
+  const resolve = (name, schema, depth) => {
+    const memo = resolved.get(name);
+    if (memo) return memo;
+    if (inProgress.has(name)) return schema;
+    inProgress.add(name);
+    const out = expand(schema, depth);
+    inProgress.delete(name);
+    resolved.set(name, out);
+    return out;
+  };
+  function expand(node, depth) {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      if (k === REF && typeof v === "string") {
+        const target = depth >= MAX_DEREF_DEPTH ? void 0 : targetOf(v, schemas);
+        if (target) {
+          const expanded = resolve(target.name, target.schema, depth + 1);
+          for (const [ek, ev] of Object.entries(expanded)) out[ek] = ev;
+          continue;
+        }
+        out[k] = v;
+        continue;
+      }
+      out[k] = walkValue(v, depth);
+    }
+    return out;
+  }
+  function walkValue(v, depth) {
+    if (Array.isArray(v)) return v.map((x) => walkValue(x, depth));
+    if (isObj(v)) return expand(v, depth);
+    return v;
+  }
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (isObj(schema)) schemas[name] = resolve(name, schema, 0);
+  }
+}
+function targetOf(ref, schemas) {
+  if (!ref.startsWith("#/components/schemas/")) return void 0;
+  const parts = ref.slice("#/components/schemas/".length).split("/").map(unescape);
+  let cur = schemas;
+  for (const part of parts) {
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = cur[part];
+    } else {
+      return void 0;
+    }
+  }
+  return isObj(cur) ? { name: parts.join("/"), schema: cur } : void 0;
+}
+function isRefNode(node) {
+  return isObj(node) && typeof node[REF] === "string";
+}
+function dereffedPair(oldNode, newNode, oldSchemas, newSchemas, seen) {
+  const oldRef = isRefNode(oldNode) ? refTarget(oldNode.$ref, oldSchemas) : void 0;
+  const newRef = isRefNode(newNode) ? refTarget(newNode.$ref, newSchemas) : void 0;
+  if (!oldRef && !newRef) {
+    return isObj(oldNode) && isObj(newNode) ? { old: oldNode, new: newNode } : void 0;
+  }
+  const oldResolved = oldRef ? oldRef.schema : isObj(oldNode) ? stripRef(oldNode) : void 0;
+  const newResolved = newRef ? newRef.schema : isObj(newNode) ? stripRef(newNode) : void 0;
+  if (!oldResolved || !newResolved) return void 0;
+  const key = `${oldRef?.name ?? "\u2022"}|${newRef?.name ?? "\u2022"}`;
+  if (oldRef && newRef && seen.has(key)) return void 0;
+  if (oldRef && newRef) seen.add(key);
+  return { old: oldResolved, new: newResolved };
+}
+function refTarget(ref, schemas) {
+  if (!isObj(schemas) && !(schemas instanceof Map) || !ref.startsWith("#/components/schemas/"))
+    return void 0;
+  const parts = ref.slice("#/components/schemas/".length).split("/").map(unescape);
+  let cur = schemas;
+  for (const part of parts) {
+    if (cur instanceof Map) {
+      cur = cur.get(part);
+    } else if (isObj(cur)) {
+      cur = cur[part];
+    } else {
+      return void 0;
+    }
+  }
+  return isObj(cur) ? { name: parts.join("/"), schema: cur } : void 0;
+}
+function stripRef(node) {
+  if (!(REF in node)) return node;
+  const out = { ...node };
+  delete out[REF];
+  return out;
+}
+
+// src/core/engine/schema-differ.ts
+var MAX_DEPTH = 256;
+var CONSTRAINT_LABEL = {
+  pattern: "pattern",
+  minLength: "minLength",
+  maxLength: "maxLength",
+  minItems: "minItems",
+  maxItems: "maxItems",
+  multipleOf: "multipleOf",
+  minimum: "minimum",
+  maximum: "maximum",
+  exclusiveMinimum: "exclusiveMinimum",
+  exclusiveMaximum: "exclusiveMaximum"
+};
+var NUMERIC_KEYS = /* @__PURE__ */ new Set([
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf"
+]);
+function diffSchemaNode(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, opts) {
+  const depth = opts.depth ?? 0;
+  const seen = opts.seen ?? /* @__PURE__ */ new Set();
+  if (depth > MAX_DEPTH) return;
+  if (isRefNode(oldSchema) || isRefNode(newSchema)) {
+    if (depth === 0 && isRefNode(oldSchema) && isRefNode(newSchema) && oldSchema.$ref === newSchema.$ref) {
+      return;
+    }
+    const pair = dereffedPair(
+      oldSchema,
+      newSchema,
+      ctx.baselineIndex.schemas,
+      ctx.currentIndex.schemas,
+      seen
+    );
+    if (!pair) return;
+    diffSchemaNode(ctx, pair.old, pair.new, pointerOld, pointerNew, location, {
+      ...opts,
+      depth: depth + 1,
+      seen
+    });
+    return;
+  }
+  const name = lastToken(pointerNew) || lastToken(pointerOld) || "value";
+  const isParamTop = location.context === "parameter" && !pointerOld.includes("/properties/") && !pointerOld.includes("/items");
+  if (!deepEqual(oldSchema.type, newSchema.type)) {
+    emit(ctx, {
+      ruleId: isParamTop ? "parameter-type-changed" : "property-type-changed",
+      location: { ...location, pointerOld, pointerNew },
+      oldValue: compactType(oldSchema.type),
+      newValue: compactType(newSchema.type),
+      doctrine: { sideClass: opts.sideClass }
+    });
+  }
+  if (!deepEqual(oldSchema.format, newSchema.format)) {
+    emit(ctx, {
+      ruleId: isParamTop ? "parameter-format-changed" : "property-format-changed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/format`,
+        pointerNew: `${pointerNew}/format`
+      },
+      oldValue: oldSchema.format,
+      newValue: newSchema.format,
+      doctrine: { sideClass: opts.sideClass }
+    });
+  }
+  if (!deepEqual(oldSchema.default, newSchema.default)) {
+    emit(ctx, {
+      ruleId: isParamTop ? "parameter-default-changed" : "property-default-changed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/default`,
+        pointerNew: `${pointerNew}/default`
+      },
+      oldValue: compact(oldSchema.default),
+      newValue: compact(newSchema.default),
+      doctrine: { sideClass: opts.sideClass }
+    });
+  }
+  diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffConst(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts);
+  diffDiscriminator(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name);
+  if (!deepEqual(oldSchema.description, newSchema.description) || !deepEqual(oldSchema.title, newSchema.title) || !deepEqual(oldSchema.example, newSchema.example)) {
+    emit(ctx, {
+      ruleId: "schema-description-changed",
+      location: { ...location, pointerOld, pointerNew }
+    });
+  }
+  const oldProps = isObject(oldSchema.properties) ? oldSchema.properties : {};
+  const newProps = isObject(newSchema.properties) ? newSchema.properties : {};
+  const reqOld = opts.requiredOld;
+  const reqNew = opts.requiredNew;
+  for (const propName of Object.keys(oldProps).sort()) {
+    const oldChild = oldProps[propName];
+    const newChild = newProps[propName];
+    if (newChild === void 0) {
+      const isReqHeader = location.context === "request-header";
+      emit(ctx, {
+        ruleId: isReqHeader ? "request-header-removed" : "property-removed",
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/properties/${escape(propName)}`,
+          pointerNew: ""
+        },
+        oldValue: propName,
+        doctrine: {
+          wasRequired: reqOld.includes(propName),
+          sideClass: opts.sideClass
+        }
+      });
+      continue;
+    }
+    if (!isObject(oldChild) || !isObject(newChild)) continue;
+    const wasReq = reqOld.includes(propName);
+    const isReq = reqNew.includes(propName);
+    if (!wasReq && isReq) {
+      emit(ctx, {
+        ruleId: "required-property-added",
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/properties/${escape(propName)}`,
+          pointerNew: `${pointerNew}/properties/${escape(propName)}`
+        },
+        oldValue: propName,
+        doctrine: { wasRequired: true, sideClass: opts.sideClass }
+      });
+    } else if (!wasReq && !isReq) {
+    }
+    diffSchemaNode(
+      ctx,
+      oldChild,
+      newChild,
+      `${pointerOld}/properties/${escape(propName)}`,
+      `${pointerNew}/properties/${escape(propName)}`,
+      location,
+      {
+        requiredOld: stringArray2(oldChild.required),
+        requiredNew: stringArray2(newChild.required),
+        sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen
+      }
+    );
+  }
+  for (const propName of Object.keys(newProps).sort()) {
+    if (oldProps[propName] !== void 0) continue;
+    const newChild = newProps[propName];
+    if (!isObject(newChild)) continue;
+    const isReq = reqNew.includes(propName);
+    if (!isReq) {
+      emit(ctx, {
+        ruleId: "property-added",
+        location: {
+          ...location,
+          pointerOld: "",
+          pointerNew: `${pointerNew}/properties/${escape(propName)}`
+        },
+        newValue: propName
+      });
+    } else {
+      emit(ctx, {
+        ruleId: "required-property-added",
+        location: {
+          ...location,
+          pointerOld: "",
+          pointerNew: `${pointerNew}/properties/${escape(propName)}`
+        },
+        newValue: propName,
+        doctrine: { wasRequired: true, sideClass: opts.sideClass }
+      });
+    }
+  }
+  const oldItems = isObject(oldSchema.items) ? oldSchema.items : void 0;
+  const newItems = isObject(newSchema.items) ? newSchema.items : void 0;
+  if (oldItems && newItems) {
+    diffSchemaNode(
+      ctx,
+      oldItems,
+      newItems,
+      `${pointerOld}/items`,
+      `${pointerNew}/items`,
+      location,
+      {
+        requiredOld: stringArrayOf(oldItems.required),
+        requiredNew: stringArrayOf(newItems.required),
+        sideClass: opts.sideClass,
+        depth: depth + 1,
+        seen
+      }
+    );
+  }
+  for (const propName of reqOld) {
+    if (!reqNew.includes(propName) && newProps[propName] !== void 0) {
+      emit(ctx, {
+        ruleId: "required-removed",
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/required`,
+          pointerNew: `${pointerNew}/required`
+        },
+        oldValue: propName
+      });
+    }
+  }
+}
+function diffEnum(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
+  const oldEnum = Array.isArray(oldSchema.enum) ? oldSchema.enum : void 0;
+  const newEnum = Array.isArray(newSchema.enum) ? newSchema.enum : void 0;
+  if (!oldEnum && !newEnum) return;
+  const ptr = `${pointerOld}/enum`;
+  const ptrNew = `${pointerNew}/enum`;
+  if (oldEnum === void 0 && newEnum !== void 0) {
+    emit(ctx, {
+      ruleId: "constraint-added",
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: void 0,
+      newValue: compactEnum(newEnum),
+      doctrine: { sideClass: opts.sideClass }
+    });
+    return;
+  }
+  if (oldEnum !== void 0 && newEnum === void 0) {
+    emit(ctx, {
+      ruleId: "constraint-removed",
+      location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+      oldValue: compactEnum(oldEnum),
+      newValue: void 0,
+      doctrine: { sideClass: opts.sideClass }
+    });
+    return;
+  }
+  if (!oldEnum || !newEnum) return;
+  const compactOld = compactEnum(oldEnum);
+  const compactNew = compactEnum(newEnum);
+  for (const v of oldEnum) {
+    if (!newEnum.some((n) => deepEqual(n, v))) {
+      emit(ctx, {
+        ruleId: "enum-value-removed",
+        location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+        oldValue: v,
+        newValue: compactNew,
+        doctrine: { sideClass: opts.sideClass }
+      });
+    }
+  }
+  for (const v of newEnum) {
+    if (!oldEnum.some((o) => deepEqual(o, v))) {
+      emit(ctx, {
+        ruleId: "enum-value-added",
+        location: { ...location, pointerOld: ptr, pointerNew: ptrNew },
+        oldValue: compactOld,
+        newValue: v,
+        doctrine: { sideClass: opts.sideClass }
+      });
+    }
+  }
+  void name;
+}
+function compactEnum(e) {
+  if (e.length <= 8) return e;
+  return `${e.length} values`;
+}
+function diffConst(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+  const oldConst = oldSchema.const;
+  const newConst = newSchema.const;
+  const base = { ...location };
+  void name;
+  if (oldConst === void 0 && newConst !== void 0) {
+    emit(ctx, {
+      ruleId: "const-added",
+      location: { ...base, pointerOld: `${pointerOld}/const`, pointerNew: `${pointerNew}/const` },
+      oldValue: void 0,
+      newValue: newConst
+    });
+  } else if (oldConst !== void 0 && newConst !== void 0 && !deepEqual(oldConst, newConst)) {
+    emit(ctx, {
+      ruleId: "const-changed",
+      location: { ...base, pointerOld: `${pointerOld}/const`, pointerNew: `${pointerNew}/const` },
+      oldValue: oldConst,
+      newValue: newConst
+    });
+  } else if (oldConst !== void 0 && newConst === void 0) {
+    emit(ctx, {
+      ruleId: "const-removed",
+      location: { ...base, pointerOld: `${pointerOld}/const`, pointerNew: `${pointerNew}/const` },
+      oldValue: oldConst
+    });
+  }
+}
+function diffConstraints(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
+  for (const key of Object.keys(CONSTRAINT_LABEL)) {
+    const oldV = oldSchema[key];
+    const newV = newSchema[key];
+    if (oldV === void 0 && newV === void 0) continue;
+    const ptrOld = `${pointerOld}/${key}`;
+    const ptrNew = `${pointerNew}/${key}`;
+    const base = { ...location };
+    if (oldV === void 0 && newV !== void 0) {
+      emit(ctx, {
+        ruleId: "constraint-added",
+        location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
+        oldValue: void 0,
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
+      });
+      continue;
+    }
+    if (oldV !== void 0 && newV === void 0) {
+      emit(ctx, {
+        ruleId: "constraint-removed",
+        location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
+        oldValue: oldV,
+        doctrine: { sideClass: opts.sideClass }
+      });
+      continue;
+    }
+    if (deepEqual(oldV, newV)) continue;
+    if (key === "pattern") {
+      emit(ctx, {
+        ruleId: "constraint-tightened",
+        location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
+        oldValue: oldV,
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
+      });
+      continue;
+    }
+    if (NUMERIC_KEYS.has(key)) {
+      const o2 = num(oldV);
+      const n2 = num(newV);
+      const isLower = LOWER_BOUNDS.includes(key) || key === "exclusiveMinimum";
+      const dir = boundDirection(isLower ? "lower" : "upper", o2, n2);
+      emit(ctx, {
+        ruleId: dir === "tightened" ? "constraint-tightened" : "constraint-relaxed",
+        location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
+        oldValue: oldV,
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
+      });
+      continue;
+    }
+    const o = num(oldV);
+    const n = num(newV);
+    if (o !== void 0 && n !== void 0) {
+      const isLower = LOWER_BOUNDS.includes(key);
+      const dir = boundDirection(isLower ? "lower" : "upper", o, n);
+      emit(ctx, {
+        ruleId: dir === "tightened" ? "constraint-tightened" : "constraint-relaxed",
+        location: { ...base, pointerOld: ptrOld, pointerNew: ptrNew },
+        oldValue: oldV,
+        newValue: newV,
+        doctrine: { sideClass: opts.sideClass }
+      });
+    }
+    void name;
+  }
+}
+function diffAdditionalProperties(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
+  const oldClosed = isClosed(oldSchema.additionalProperties);
+  const newClosed = isClosed(newSchema.additionalProperties);
+  void name;
+  if (!oldClosed && newClosed) {
+    emit(ctx, {
+      ruleId: "map-closed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/additionalProperties`,
+        pointerNew: `${pointerNew}/additionalProperties`
+      },
+      doctrine: { sideClass: opts.sideClass }
+    });
+  } else if (oldClosed && !newClosed) {
+    emit(ctx, {
+      ruleId: "map-opened",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/additionalProperties`,
+        pointerNew: `${pointerNew}/additionalProperties`
+      },
+      doctrine: { sideClass: opts.sideClass }
+    });
+  }
+  const oldAp = isObject(oldSchema.additionalProperties) ? oldSchema.additionalProperties : void 0;
+  const newAp = isObject(newSchema.additionalProperties) ? newSchema.additionalProperties : void 0;
+  if (oldAp && newAp) {
+    diffSchemaNode(
+      ctx,
+      oldAp,
+      newAp,
+      `${pointerOld}/additionalProperties`,
+      `${pointerNew}/additionalProperties`,
+      location,
+      {
+        requiredOld: stringArrayOf(oldAp.required),
+        requiredNew: stringArrayOf(newAp.required),
+        sideClass: opts.sideClass,
+        depth: (opts.depth ?? 0) + 1,
+        seen: opts.seen
+      }
+    );
+  }
+}
+function isClosed(v) {
+  if (v === void 0 || v === true) return false;
+  return true;
+}
+function diffComposition(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name, opts) {
+  void name;
+  const oldAll = Array.isArray(oldSchema.allOf) ? oldSchema.allOf : [];
+  const newAll = Array.isArray(newSchema.allOf) ? newSchema.allOf : [];
+  if (newAll.length > oldAll.length) {
+    emit(ctx, {
+      ruleId: "allOf-member-added",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/allOf`,
+        pointerNew: `${pointerNew}/allOf`
+      },
+      oldValue: oldAll.length,
+      newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass }
+    });
+  } else if (newAll.length < oldAll.length) {
+    emit(ctx, {
+      ruleId: "allOf-member-removed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/allOf`,
+        pointerNew: `${pointerNew}/allOf`
+      },
+      oldValue: oldAll.length,
+      newValue: newAll.length,
+      doctrine: { sideClass: opts.sideClass }
+    });
+  }
+  diffCompositionMembers(
+    ctx,
+    oldAll,
+    newAll,
+    `${pointerOld}/allOf`,
+    `${pointerNew}/allOf`,
+    location,
+    opts
+  );
+  for (const key of ["anyOf", "oneOf"]) {
+    const oldArr = Array.isArray(oldSchema[key]) ? oldSchema[key] : [];
+    const newArr = Array.isArray(newSchema[key]) ? newSchema[key] : [];
+    if (newArr.length > oldArr.length) {
+      emit(ctx, {
+        ruleId: "anyOf-oneOf-member-added",
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/${key}`,
+          pointerNew: `${pointerNew}/${key}`
+        },
+        oldValue: oldArr.length,
+        newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass }
+      });
+    } else if (newArr.length < oldArr.length) {
+      emit(ctx, {
+        ruleId: "anyOf-oneOf-member-removed",
+        location: {
+          ...location,
+          pointerOld: `${pointerOld}/${key}`,
+          pointerNew: `${pointerNew}/${key}`
+        },
+        oldValue: oldArr.length,
+        newValue: newArr.length,
+        doctrine: { sideClass: opts.sideClass }
+      });
+    }
+    diffCompositionMembers(
+      ctx,
+      oldArr,
+      newArr,
+      `${pointerOld}/${key}`,
+      `${pointerNew}/${key}`,
+      location,
+      opts
+    );
+  }
+}
+function diffCompositionMembers(ctx, oldArr, newArr, pointerOld, pointerNew, location, opts) {
+  const depth = (opts.depth ?? 0) + 1;
+  const seen = opts.seen;
+  const oldObjects = [];
+  for (let i = 0; i < oldArr.length; i++) {
+    if (isObject(oldArr[i])) oldObjects.push({ idx: i, obj: oldArr[i] });
+  }
+  const newObjects = [];
+  for (let j = 0; j < newArr.length; j++) {
+    if (isObject(newArr[j])) newObjects.push({ idx: j, obj: newArr[j] });
+  }
+  const matchedOld = /* @__PURE__ */ new Set();
+  const matchedNew = /* @__PURE__ */ new Set();
+  const pairs = [];
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.$ref === "string") {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.$ref === o.obj.$ref);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (typeof o.obj.title === "string" && o.obj.title) {
+      const match = newObjects.find((n) => !matchedNew.has(n.idx) && n.obj.title === o.obj.title);
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    const match = newObjects.find((n) => !matchedNew.has(n.idx) && deepEqual(o.obj, n.obj));
+    if (match) {
+      matchedOld.add(o.idx);
+      matchedNew.add(match.idx);
+    }
+  }
+  for (const o of oldObjects) {
+    if (matchedOld.has(o.idx)) continue;
+    if (o.obj.type !== void 0) {
+      const match = newObjects.find(
+        (n) => !matchedNew.has(n.idx) && deepEqual(o.obj.type, n.obj.type)
+      );
+      if (match) {
+        matchedOld.add(o.idx);
+        matchedNew.add(match.idx);
+        pairs.push({ oldIdx: o.idx, newIdx: match.idx });
+      }
+    }
+  }
+  const remainingOld = oldObjects.filter((o) => !matchedOld.has(o.idx));
+  const remainingNew = newObjects.filter((n) => !matchedNew.has(n.idx));
+  const minRemaining = Math.min(remainingOld.length, remainingNew.length);
+  for (let k = 0; k < minRemaining; k++) {
+    const o = remainingOld[k];
+    const n = remainingNew[k];
+    if (o && n) {
+      pairs.push({ oldIdx: o.idx, newIdx: n.idx });
+    }
+  }
+  for (const pair of pairs) {
+    const oM = oldArr[pair.oldIdx];
+    const nM = newArr[pair.newIdx];
+    diffSchemaNode(
+      ctx,
+      oM,
+      nM,
+      `${pointerOld}/${pair.oldIdx}`,
+      `${pointerNew}/${pair.newIdx}`,
+      location,
+      {
+        requiredOld: stringArrayOf(oM.required),
+        requiredNew: stringArrayOf(nM.required),
+        sideClass: opts.sideClass,
+        depth,
+        seen
+      }
+    );
+  }
+}
+function diffDiscriminator(ctx, oldSchema, newSchema, pointerOld, pointerNew, location, name) {
+  void name;
+  const oldDisc = isObject(oldSchema.discriminator) ? oldSchema.discriminator : void 0;
+  const newDisc = isObject(newSchema.discriminator) ? newSchema.discriminator : void 0;
+  if (!oldDisc && newDisc) {
+    emit(ctx, {
+      ruleId: "discriminator-added",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`
+      },
+      newValue: newDisc.propertyName
+    });
+  } else if (oldDisc && newDisc && !deepEqual(oldDisc, newDisc)) {
+    emit(ctx, {
+      ruleId: "discriminator-changed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`
+      },
+      oldValue: oldDisc.propertyName,
+      newValue: newDisc.propertyName
+    });
+  } else if (oldDisc && !newDisc) {
+    emit(ctx, {
+      ruleId: "discriminator-changed",
+      location: {
+        ...location,
+        pointerOld: `${pointerOld}/discriminator`,
+        pointerNew: `${pointerNew}/discriminator`
+      },
+      oldValue: oldDisc.propertyName,
+      newValue: void 0
+    });
+  }
+}
+function compactType(t) {
+  if (t === void 0) return void 0;
+  return typeLabel(t);
+}
+function compact(v) {
+  if (v === void 0 || v === null) return v;
+  if (typeof v !== "object") return v;
+  const json = JSON.stringify(v);
+  if (json === void 0 || json.length <= 80) return v;
+  return `${json.slice(0, 77)}\u2026`;
+}
+function stringArrayOf(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function stringArray2(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function lastToken(pointer) {
+  const tokens = pointer.split("/").filter(Boolean);
+  const last = tokens[tokens.length - 1];
+  return (last ?? "").replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+// src/core/engine/differ.ts
+function emit(ctx, opts) {
+  const resolved = classify(
+    opts.ruleId,
+    opts.location.context,
+    { rules: ctx.config.rules, profile: ctx.config.profile },
+    opts.doctrine
+  );
+  const rule = getRule(opts.ruleId);
+  const severity = opts.severityOverride ?? (resolved ? resolved.severity : rule.defaultSeverity);
+  const kind = opts.kindOverride ?? (resolved ? resolved.kind : rule.defaultKind);
+  if (resolved === null) return;
+  const templateCtx = {
+    location: opts.location,
+    oldValue: opts.oldValue,
+    newValue: opts.newValue
+  };
+  const change = {
+    id: changeId({
+      ruleId: opts.ruleId,
+      context: opts.location.context,
+      path: opts.location.path,
+      method: opts.location.method,
+      pointerOld: opts.location.pointerOld,
+      pointerNew: opts.location.pointerNew,
+      oldValue: opts.oldValue,
+      newValue: opts.newValue
+    }),
+    ruleId: opts.ruleId,
+    severity,
+    kind,
+    breaking: severity === "error",
+    location: opts.location,
+    message: rule.message(templateCtx),
+    suggestion: rule.suggestion(templateCtx),
+    ...opts.oldValue !== void 0 ? { oldValue: opts.oldValue } : {},
+    ...opts.newValue !== void 0 ? { newValue: opts.newValue } : {}
+  };
+  ctx.candidates.push(change);
+}
+function diffDocumentLevel(ctx) {
+  const oldDoc = isObject(ctx.baseline.normalized) ? ctx.baseline.normalized : {};
+  const newDoc = isObject(ctx.current.normalized) ? ctx.current.normalized : {};
+  if (!deepEqual(oldDoc.openapi, newDoc.openapi)) {
+    emit(ctx, {
+      ruleId: "openapi-version-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("openapi"),
+        pointerNew: pointerJoin("openapi"),
+        context: "api"
+      },
+      oldValue: oldDoc.openapi,
+      newValue: newDoc.openapi
+    });
+  }
+  const infoOld = isObject(oldDoc.info) ? oldDoc.info : {};
+  const infoNew = isObject(newDoc.info) ? newDoc.info : {};
+  if (!deepEqual(infoOld.title, infoNew.title)) {
+    emit(ctx, {
+      ruleId: "title-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("info", "title"),
+        pointerNew: pointerJoin("info", "title"),
+        context: "api"
+      },
+      oldValue: infoOld.title,
+      newValue: infoNew.title
+    });
+  }
+  if (!deepEqual(infoOld.description, infoNew.description)) {
+    emit(ctx, {
+      ruleId: "description-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("info", "description"),
+        pointerNew: pointerJoin("info", "description"),
+        context: "api"
+      },
+      oldValue: infoOld.description,
+      newValue: infoNew.description
+    });
+  }
+  if (!deepEqual(infoOld.contact, infoNew.contact)) {
+    emit(ctx, {
+      ruleId: "contact-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("info", "contact"),
+        pointerNew: pointerJoin("info", "contact"),
+        context: "api"
+      },
+      oldValue: compact2(infoOld.contact),
+      newValue: compact2(infoNew.contact)
+    });
+  }
+  if (!deepEqual(infoOld.license, infoNew.license)) {
+    emit(ctx, {
+      ruleId: "license-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("info", "license"),
+        pointerNew: pointerJoin("info", "license"),
+        context: "api"
+      },
+      oldValue: compact2(infoOld.license),
+      newValue: compact2(infoNew.license)
+    });
+  }
+  if (!deepEqual(oldDoc.externalDocs, newDoc.externalDocs)) {
+    emit(ctx, {
+      ruleId: "external-docs-changed",
+      location: {
+        path: "/",
+        pointerOld: pointerJoin("externalDocs"),
+        pointerNew: pointerJoin("externalDocs"),
+        context: "api"
+      },
+      oldValue: compact2(oldDoc.externalDocs),
+      newValue: compact2(newDoc.externalDocs)
+    });
+  }
+  diffServers(ctx, oldDoc, newDoc);
+}
+function diffServers(ctx, oldDoc, newDoc) {
+  const oldServers = Array.isArray(oldDoc.servers) ? oldDoc.servers : [];
+  const newServers = Array.isArray(newDoc.servers) ? newDoc.servers : [];
+  const oldUrls = oldServers.map((s) => isObject(s) ? s.url : void 0);
+  const newUrls = newServers.map((s) => isObject(s) ? s.url : void 0);
+  for (const url of oldUrls) {
+    if (typeof url === "string" && !newUrls.includes(url)) {
+      emit(ctx, {
+        ruleId: "server-url-removed",
+        location: {
+          path: "/",
+          pointerOld: pointerJoin("servers"),
+          pointerNew: pointerJoin("servers"),
+          context: "api"
+        },
+        oldValue: url
+      });
+    }
+  }
+  for (const url of newUrls) {
+    if (typeof url === "string" && !oldUrls.includes(url)) {
+      emit(ctx, {
+        ruleId: "server-url-added",
+        location: {
+          path: "/",
+          pointerOld: pointerJoin("servers"),
+          pointerNew: pointerJoin("servers"),
+          context: "api"
+        },
+        newValue: url
+      });
+    }
+  }
+  for (const oldS of oldServers) {
+    if (!isObject(oldS)) continue;
+    const url = oldS.url;
+    if (typeof url !== "string") continue;
+    const newS = newServers.find((s) => isObject(s) && s.url === url);
+    if (!newS || !isObject(newS)) continue;
+    if (!deepEqual(oldS.description, newS.description) || !deepEqual(oldS.variables, newS.variables)) {
+      emit(ctx, {
+        ruleId: "server-metadata-changed",
+        location: {
+          path: "/",
+          pointerOld: pointerJoin("servers"),
+          pointerNew: pointerJoin("servers"),
+          context: "api"
+        },
+        oldValue: compact2({ description: oldS.description, variables: oldS.variables }),
+        newValue: compact2({ description: newS.description, variables: newS.variables })
+      });
+    }
+  }
+}
+function diffOperations(ctx) {
+  const { baselineIndex: bi, currentIndex: ci } = ctx;
+  for (const p of bi.paths) {
+    if (!ci.pathItems.has(p)) {
+      emit(ctx, {
+        ruleId: "removed-path",
+        location: {
+          path: p,
+          pointerOld: pointerJoin("paths", p),
+          pointerNew: "",
+          context: "operation"
+        }
+      });
+    }
+  }
+  const commonPaths = bi.paths.filter((p) => ci.pathItems.has(p));
+  for (const p of commonPaths) {
+    const oldItem = bi.pathItems.get(p);
+    const newItem = ci.pathItems.get(p);
+    const oldMethods = methodKeys(oldItem);
+    const newMethods = methodKeys(newItem);
+    for (const m of oldMethods) {
+      if (!newMethods.includes(m)) {
+        emit(ctx, {
+          ruleId: "removed-method",
+          location: {
+            path: p,
+            method: m,
+            pointerOld: pointerJoin("paths", p, m.toLowerCase()),
+            pointerNew: "",
+            context: "operation"
+          }
+        });
+      }
+    }
+    for (const m of newMethods) {
+      if (!oldMethods.includes(m)) {
+        emit(ctx, {
+          ruleId: "operation-added",
+          location: {
+            path: p,
+            method: m,
+            pointerOld: "",
+            pointerNew: pointerJoin("paths", p, m.toLowerCase()),
+            context: "operation"
+          }
+        });
+      }
+    }
+    for (const m of oldMethods.filter((m2) => newMethods.includes(m2))) {
+      diffOperationPair(ctx, p, m, oldItem, newItem);
+    }
+  }
+  for (const p of ci.paths) {
+    if (!bi.pathItems.has(p)) {
+      const newItem = ci.pathItems.get(p);
+      for (const m of methodKeys(newItem)) {
+        emit(ctx, {
+          ruleId: "operation-added",
+          location: {
+            path: p,
+            method: m,
+            pointerOld: "",
+            pointerNew: pointerJoin("paths", p, m.toLowerCase()),
+            context: "operation"
+          }
+        });
+      }
+    }
+  }
+  diffWebhooks(ctx);
+}
+function methodKeys(item) {
+  return Object.keys(item).filter(
+    (k) => ["get", "post", "put", "patch", "delete", "head", "options", "trace"].includes(
+      k.toLowerCase()
+    )
+  ).map((k) => k.toUpperCase()).sort();
+}
+function opPointer(baseLoc, ...sub) {
+  const prefix = baseLoc.pointerPrefix ?? (baseLoc.method ? ["paths", baseLoc.path, baseLoc.method.toLowerCase()] : ["paths", baseLoc.path]);
+  return pointerJoin(...prefix, ...sub);
+}
+function diffOperationPair(ctx, path4, method, oldItem, newItem, overrides) {
+  const oldOp = isObject(oldItem[method.toLowerCase()]) ? oldItem[method.toLowerCase()] : {};
+  const newOp = isObject(newItem[method.toLowerCase()]) ? newItem[method.toLowerCase()] : {};
+  const baseLoc = {
+    path: path4,
+    method,
+    pointerPrefix: overrides?.pointerPrefix,
+    context: overrides?.context
+  };
+  const opContext = baseLoc.context ?? "operation";
+  if (!deepEqual(oldOp.operationId, newOp.operationId)) {
+    emit(ctx, {
+      ruleId: "operation-id-changed",
+      location: {
+        ...baseLoc,
+        operationId: typeof newOp.operationId === "string" ? newOp.operationId : void 0,
+        pointerOld: opPointer(baseLoc, "operationId"),
+        pointerNew: opPointer(baseLoc, "operationId"),
+        context: opContext
+      },
+      oldValue: oldOp.operationId,
+      newValue: newOp.operationId
+    });
+  }
+  const oldDep = oldOp.deprecated === true;
+  const newDep = newOp.deprecated === true;
+  if (newDep && !oldDep) {
+    emit(ctx, {
+      ruleId: "operation-deprecated-added",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "deprecated"),
+        pointerNew: opPointer(baseLoc, "deprecated"),
+        context: opContext
+      }
+    });
+  } else if (oldDep && !newDep) {
+    emit(ctx, {
+      ruleId: "operation-deprecated-removed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "deprecated"),
+        pointerNew: opPointer(baseLoc, "deprecated"),
+        context: opContext
+      }
+    });
+  }
+  if (!deepEqual(oldOp.tags, newOp.tags)) {
+    emit(ctx, {
+      ruleId: "operation-tags-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "tags"),
+        pointerNew: opPointer(baseLoc, "tags"),
+        context: opContext
+      },
+      oldValue: compact2(oldOp.tags),
+      newValue: compact2(newOp.tags)
+    });
+  }
+  if (!deepEqual(oldOp.summary, newOp.summary)) {
+    emit(ctx, {
+      ruleId: "operation-summary-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "summary"),
+        pointerNew: opPointer(baseLoc, "summary"),
+        context: opContext
+      },
+      oldValue: oldOp.summary,
+      newValue: newOp.summary
+    });
+  }
+  if (!deepEqual(oldOp.description, newOp.description)) {
+    emit(ctx, {
+      ruleId: "operation-description-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "description"),
+        pointerNew: opPointer(baseLoc, "description"),
+        context: opContext
+      },
+      oldValue: oldOp.description,
+      newValue: newOp.description
+    });
+  }
+  diffNamedMap(ctx, oldOp.callbacks, newOp.callbacks, "callback-added", "callback-removed", {
+    ...baseLoc,
+    context: opContext
+  });
+  diffParameters(ctx, baseLoc, oldItem, oldOp, newItem, newOp);
+  diffRequestBody(ctx, baseLoc, oldOp, newOp);
+  diffResponses(ctx, baseLoc, oldOp, newOp);
+}
+function diffNamedMap(ctx, oldMap, newMap, addedRule, removedRule, baseLoc) {
+  const oldObj = isObject(oldMap) ? oldMap : {};
+  const newObj = isObject(newMap) ? newMap : {};
+  for (const name of Object.keys(oldObj).sort()) {
+    if (!(name in newObj)) {
+      emit(ctx, {
+        ruleId: removedRule,
+        location: {
+          ...baseLoc,
+          pointerOld: opPointer(baseLoc, "callbacks", name),
+          pointerNew: "",
+          context: baseLoc.context ?? "operation"
+        },
+        oldValue: name
+      });
+    } else {
+      const oldCb = isObject(oldObj[name]) ? oldObj[name] : {};
+      const newCb = isObject(newObj[name]) ? newObj[name] : {};
+      for (const url of Object.keys(oldCb).sort()) {
+        if (url in newCb) {
+          const oldPathItem = isObject(oldCb[url]) ? oldCb[url] : {};
+          const newPathItem = isObject(newCb[url]) ? newCb[url] : {};
+          const oldMethods = methodKeys(oldPathItem);
+          const newMethods = methodKeys(newPathItem);
+          for (const m of oldMethods.filter((m2) => newMethods.includes(m2))) {
+            const prefix = [
+              ...baseLoc.pointerPrefix ?? (baseLoc.method ? ["paths", baseLoc.path, baseLoc.method.toLowerCase()] : ["paths", baseLoc.path]),
+              "callbacks",
+              name,
+              url,
+              m.toLowerCase()
+            ];
+            diffOperationPair(ctx, baseLoc.path, m, oldPathItem, newPathItem, {
+              pointerPrefix: prefix,
+              context: "callback"
+            });
+          }
+        }
+      }
+    }
+  }
+  for (const name of Object.keys(newObj).sort()) {
+    if (!(name in oldObj)) {
+      emit(ctx, {
+        ruleId: addedRule,
+        location: {
+          ...baseLoc,
+          pointerOld: "",
+          pointerNew: opPointer(baseLoc, "callbacks", name),
+          context: baseLoc.context ?? "operation"
+        },
+        newValue: name
+      });
+    }
+  }
+}
+function diffParameters(ctx, baseLoc, oldItem, oldOp, newItem, newOp) {
+  const oldParams = mergedParameters(oldItem, oldOp);
+  const newParams = mergedParameters(newItem, newOp);
+  const exactKey = (p) => `${typeof p.name === "string" ? p.name : ""}::${typeof p.in === "string" ? p.in : ""}`;
+  const oldMap = /* @__PURE__ */ new Map();
+  for (const p of oldParams) {
+    const k = exactKey(p);
+    if (!oldMap.has(k)) oldMap.set(k, p);
+  }
+  const newMap = /* @__PURE__ */ new Map();
+  for (const p of newParams) {
+    const k = exactKey(p);
+    if (!newMap.has(k)) newMap.set(k, p);
+  }
+  const matched = [];
+  const unmatchedOld = /* @__PURE__ */ new Map();
+  const unmatchedNew = /* @__PURE__ */ new Map();
+  for (const [k, oldP] of oldMap) {
+    const newP = newMap.get(k);
+    if (newP) {
+      matched.push([oldP, newP]);
+    } else {
+      unmatchedOld.set(k, oldP);
+    }
+  }
+  for (const [k, newP] of newMap) {
+    if (!oldMap.has(k)) {
+      unmatchedNew.set(k, newP);
+    }
+  }
+  for (const [oldK, oldP] of Array.from(unmatchedOld.entries())) {
+    const oldName = typeof oldP.name === "string" ? oldP.name : "";
+    const matchingNewEntry = Array.from(unmatchedNew.entries()).find(
+      ([, newP]) => (typeof newP.name === "string" ? newP.name : "") === oldName
+    );
+    if (matchingNewEntry) {
+      const [newK, newP] = matchingNewEntry;
+      unmatchedOld.delete(oldK);
+      unmatchedNew.delete(newK);
+      const wasIn = typeof oldP.in === "string" ? oldP.in : "";
+      const newIn = typeof newP.in === "string" ? newP.in : "";
+      emit(ctx, {
+        ruleId: "parameter-location-changed",
+        location: {
+          ...baseLoc,
+          pointerOld: opPointer(baseLoc, "parameters", oldName),
+          pointerNew: opPointer(baseLoc, "parameters", oldName),
+          context: "parameter"
+        },
+        oldValue: wasIn,
+        newValue: newIn
+      });
+      diffParameterDetails(ctx, baseLoc, oldP, newP);
+    }
+  }
+  for (const [, oldP] of unmatchedOld) {
+    const name = typeof oldP.name === "string" ? oldP.name : "";
+    const wasIn = typeof oldP.in === "string" ? oldP.in : "";
+    const wasRequired = oldP.required === true || wasIn === "path" || wasIn === "header";
+    emit(ctx, {
+      ruleId: "removed-parameter",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: "",
+        context: wasIn === "header" ? "request-header" : "parameter"
+      },
+      oldValue: name,
+      doctrine: { wasRequired }
+    });
+  }
+  for (const [oldP, newP] of matched) {
+    diffParameterDetails(ctx, baseLoc, oldP, newP);
+  }
+  for (const [, newP] of unmatchedNew) {
+    const name = typeof newP.name === "string" ? newP.name : "";
+    const isIn = typeof newP.in === "string" ? newP.in : "";
+    const required = newP.required === true || isIn === "path";
+    emit(ctx, {
+      ruleId: required ? "parameter-added-required" : "parameter-added-optional",
+      location: {
+        ...baseLoc,
+        pointerOld: "",
+        pointerNew: opPointer(baseLoc, "parameters", name),
+        context: "parameter"
+      },
+      newValue: name
+    });
+  }
+}
+function diffParameterDetails(ctx, baseLoc, oldP, newP) {
+  const name = typeof oldP.name === "string" ? oldP.name : typeof newP.name === "string" ? newP.name : "";
+  const oldReq = oldP.required === true;
+  const newReq = newP.required === true;
+  if (!oldReq && newReq) {
+    emit(ctx, {
+      ruleId: "parameter-made-required",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: opPointer(baseLoc, "parameters", name),
+        context: "parameter"
+      }
+    });
+  }
+  if (!deepEqual(oldP.style, newP.style) || !deepEqual(oldP.explode, newP.explode)) {
+    emit(ctx, {
+      ruleId: "parameter-style-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name, "style"),
+        pointerNew: opPointer(baseLoc, "parameters", name, "style"),
+        context: "parameter"
+      },
+      oldValue: oldP.style ?? (oldP.explode !== void 0 ? `explode:${oldP.explode}` : void 0),
+      newValue: newP.style ?? (newP.explode !== void 0 ? `explode:${newP.explode}` : void 0)
+    });
+  }
+  const oldSchema = isObject(oldP.schema) ? oldP.schema : void 0;
+  const newSchema = isObject(newP.schema) ? newP.schema : void 0;
+  if (oldSchema && newSchema) {
+    const sideClass = baseLoc.context === "webhook" || baseLoc.context === "callback" ? "parse" : "send";
+    diffSchemaNode(
+      ctx,
+      oldSchema,
+      newSchema,
+      opPointer(baseLoc, "parameters", name, "schema"),
+      opPointer(baseLoc, "parameters", name, "schema"),
+      { context: "parameter", path: baseLoc.path, method: baseLoc.method ?? "" },
+      {
+        requiredOld: stringArrayOf2(oldSchema.required),
+        requiredNew: stringArrayOf2(newSchema.required),
+        sideClass
+      }
+    );
+  }
+  if (!deepEqual(oldP.description, newP.description) || !deepEqual(oldP.example, newP.example) || !deepEqual(oldP.deprecated, newP.deprecated)) {
+    emit(ctx, {
+      ruleId: "parameter-metadata-changed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "parameters", name),
+        pointerNew: opPointer(baseLoc, "parameters", name),
+        context: "parameter"
+      }
+    });
+  }
+}
+function diffRequestBody(ctx, baseLoc, oldOp, newOp) {
+  const oldBody = isObject(oldOp.requestBody) ? oldOp.requestBody : void 0;
+  const newBody = isObject(newOp.requestBody) ? newOp.requestBody : void 0;
+  const reqContext = baseLoc.context ?? "request-body";
+  const sideClass = baseLoc.context === "webhook" || baseLoc.context === "callback" ? "parse" : "send";
+  if (oldBody && !newBody) {
+    emit(ctx, {
+      ruleId: "request-body-removed",
+      location: {
+        ...baseLoc,
+        pointerOld: opPointer(baseLoc, "requestBody"),
+        pointerNew: "",
+        context: reqContext
+      },
+      doctrine: { wasRequired: oldBody.required === true }
+    });
+    return;
+  }
+  if (!oldBody && newBody) {
+    emit(ctx, {
+      ruleId: newBody.required === true ? "request-body-added-required" : "request-body-added-optional",
+      location: {
+        ...baseLoc,
+        pointerOld: "",
+        pointerNew: opPointer(baseLoc, "requestBody"),
+        context: reqContext
+      }
+    });
+    return;
+  }
+  if (oldBody && newBody) {
+    if (!oldBody.required && newBody.required === true) {
+      emit(ctx, {
+        ruleId: "request-body-required-changed",
+        location: {
+          ...baseLoc,
+          pointerOld: opPointer(baseLoc, "requestBody", "required"),
+          pointerNew: opPointer(baseLoc, "requestBody", "required"),
+          context: reqContext
+        }
+      });
+    }
+    const oldContent = isObject(oldBody.content) ? oldBody.content : {};
+    const newContent = isObject(newBody.content) ? newBody.content : {};
+    for (const mt of Object.keys(oldContent).sort()) {
+      if (!(mt in newContent)) {
+        emit(ctx, {
+          ruleId: "content-type-removed",
+          location: {
+            ...baseLoc,
+            mediaType: mt,
+            pointerOld: opPointer(baseLoc, "requestBody", "content", mt),
+            pointerNew: "",
+            context: reqContext
+          },
+          oldValue: mt
+        });
+      }
+    }
+    for (const mt of Object.keys(newContent).sort()) {
+      if (!(mt in oldContent)) {
+        emit(ctx, {
+          ruleId: "content-type-added",
+          location: {
+            ...baseLoc,
+            mediaType: mt,
+            pointerOld: "",
+            pointerNew: opPointer(baseLoc, "requestBody", "content", mt),
+            context: reqContext
+          },
+          newValue: mt
+        });
+      }
+    }
+    for (const mt of Object.keys(oldContent).sort()) {
+      if (!(mt in newContent)) continue;
+      const oldMt = isObject(oldContent[mt]) ? oldContent[mt] : {};
+      const newMt = isObject(newContent[mt]) ? newContent[mt] : {};
+      if (!deepEqual(oldMt.encoding, newMt.encoding) && (oldMt.encoding !== void 0 || newMt.encoding !== void 0)) {
+        emit(ctx, {
+          ruleId: "encoding-changed",
+          location: {
+            ...baseLoc,
+            mediaType: mt,
+            pointerOld: opPointer(baseLoc, "requestBody", "content", mt, "encoding"),
+            pointerNew: opPointer(baseLoc, "requestBody", "content", mt, "encoding"),
+            context: reqContext
+          },
+          oldValue: oldMt.encoding,
+          newValue: newMt.encoding
+        });
+      }
+      const oldSchemaRaw = isObject(oldMt.schema) ? oldMt.schema : void 0;
+      const newSchemaRaw = isObject(newMt.schema) ? newMt.schema : void 0;
+      if (oldSchemaRaw && newSchemaRaw) {
+        const oldSchema = applyView(oldSchemaRaw, "request");
+        const newSchema = applyView(newSchemaRaw, "request");
+        diffSchemaNode(
+          ctx,
+          oldSchema,
+          newSchema,
+          opPointer(baseLoc, "requestBody", "content", mt, "schema"),
+          opPointer(baseLoc, "requestBody", "content", mt, "schema"),
+          {
+            context: reqContext,
+            path: baseLoc.path,
+            method: baseLoc.method,
+            mediaType: mt
+          },
+          {
+            requiredOld: stringArrayOf2(oldSchema.required),
+            requiredNew: stringArrayOf2(newSchema.required),
+            sideClass
+          }
+        );
+      }
+    }
+  }
+}
+function diffResponses(ctx, baseLoc, oldOp, newOp) {
+  const oldRes = isObject(oldOp.responses) ? oldOp.responses : {};
+  const newRes = isObject(newOp.responses) ? newOp.responses : {};
+  const resContext = baseLoc.context ?? "response-body";
+  for (const status of Object.keys(oldRes).sort()) {
+    if (!(status in newRes)) {
+      emit(ctx, {
+        ruleId: status === "default" ? "default-response-removed" : "response-removed",
+        location: {
+          ...baseLoc,
+          statusCode: status,
+          pointerOld: opPointer(baseLoc, "responses", status),
+          pointerNew: "",
+          context: resContext
+        },
+        oldValue: status
+      });
+      continue;
+    }
+    const oldR = isObject(oldRes[status]) ? oldRes[status] : {};
+    const newR = isObject(newRes[status]) ? newRes[status] : {};
+    const oldHeaders = isObject(oldR.headers) ? oldR.headers : {};
+    const newHeaders = isObject(newR.headers) ? newR.headers : {};
+    for (const h of Object.keys(oldHeaders).sort()) {
+      if (!(h in newHeaders)) {
+        emit(ctx, {
+          ruleId: "response-header-removed",
+          location: {
+            ...baseLoc,
+            statusCode: status,
+            pointerOld: opPointer(baseLoc, "responses", status, "headers", h),
+            pointerNew: "",
+            context: "response-header"
+          },
+          oldValue: h
+        });
+      } else {
+        const oldH = isObject(oldHeaders[h]) ? oldHeaders[h] : {};
+        const newH = isObject(newHeaders[h]) ? newHeaders[h] : {};
+        const oldHSchema = isObject(oldH.schema) ? oldH.schema : void 0;
+        const newHSchema = isObject(newH.schema) ? newH.schema : void 0;
+        if (oldHSchema && newHSchema) {
+          diffSchemaNode(
+            ctx,
+            oldHSchema,
+            newHSchema,
+            opPointer(baseLoc, "responses", status, "headers", h, "schema"),
+            opPointer(baseLoc, "responses", status, "headers", h, "schema"),
+            {
+              context: "response-header",
+              path: baseLoc.path,
+              method: baseLoc.method,
+              statusCode: status
+            },
+            {
+              requiredOld: stringArrayOf2(oldHSchema.required),
+              requiredNew: stringArrayOf2(newHSchema.required),
+              sideClass: "parse"
+            }
+          );
+        }
+      }
+    }
+    for (const h of Object.keys(newHeaders).sort()) {
+      if (!(h in oldHeaders)) {
+        emit(ctx, {
+          ruleId: "response-header-added",
+          location: {
+            ...baseLoc,
+            statusCode: status,
+            pointerOld: "",
+            pointerNew: opPointer(baseLoc, "responses", status, "headers", h),
+            context: "response-header"
+          },
+          newValue: h
+        });
+      }
+    }
+    const oldContent = isObject(oldR.content) ? oldR.content : {};
+    const newContent = isObject(newR.content) ? newR.content : {};
+    for (const mt of Object.keys(oldContent).sort()) {
+      if (!(mt in newContent)) {
+        emit(ctx, {
+          ruleId: "content-type-removed",
+          location: {
+            ...baseLoc,
+            statusCode: status,
+            mediaType: mt,
+            pointerOld: opPointer(baseLoc, "responses", status, "content", mt),
+            pointerNew: "",
+            context: resContext
+          },
+          oldValue: mt
+        });
+      }
+    }
+    for (const mt of Object.keys(newContent).sort()) {
+      if (!(mt in oldContent)) {
+        emit(ctx, {
+          ruleId: "content-type-added",
+          location: {
+            ...baseLoc,
+            statusCode: status,
+            mediaType: mt,
+            pointerOld: "",
+            pointerNew: opPointer(baseLoc, "responses", status, "content", mt),
+            context: resContext
+          },
+          newValue: mt
+        });
+      }
+    }
+    for (const mt of Object.keys(oldContent).sort()) {
+      if (!(mt in newContent)) continue;
+      const oldMt = isObject(oldContent[mt]) ? oldContent[mt] : {};
+      const newMt = isObject(newContent[mt]) ? newContent[mt] : {};
+      const oldSchemaRaw = isObject(oldMt.schema) ? oldMt.schema : void 0;
+      const newSchemaRaw = isObject(newMt.schema) ? newMt.schema : void 0;
+      if (oldSchemaRaw && newSchemaRaw) {
+        const oldSchema = applyView(oldSchemaRaw, "response");
+        const newSchema = applyView(newSchemaRaw, "response");
+        diffSchemaNode(
+          ctx,
+          oldSchema,
+          newSchema,
+          opPointer(baseLoc, "responses", status, "content", mt, "schema"),
+          opPointer(baseLoc, "responses", status, "content", mt, "schema"),
+          {
+            context: resContext,
+            path: baseLoc.path,
+            method: baseLoc.method,
+            statusCode: status,
+            mediaType: mt
+          },
+          {
+            requiredOld: stringArrayOf2(oldSchema.required),
+            requiredNew: stringArrayOf2(newSchema.required),
+            sideClass: "parse"
+          }
+        );
+      }
+    }
+  }
+  for (const status of Object.keys(newRes).sort()) {
+    if (status in oldRes) continue;
+    emit(ctx, {
+      ruleId: "response-added",
+      location: {
+        ...baseLoc,
+        statusCode: status,
+        pointerOld: "",
+        pointerNew: opPointer(baseLoc, "responses", status),
+        context: resContext
+      },
+      newValue: status
+    });
+  }
+}
+function diffWebhooks(ctx) {
+  for (const name of ctx.baselineIndex.webhooks.keys()) {
+    if (!ctx.currentIndex.webhooks.has(name)) {
+      emit(ctx, {
+        ruleId: "webhook-removed",
+        location: {
+          path: "",
+          pointerOld: pointerJoin("webhooks", name),
+          pointerNew: "",
+          context: "webhook"
+        },
+        oldValue: name
+      });
+    } else {
+      const oldItem = ctx.baselineIndex.webhooks.get(name);
+      const newItem = ctx.currentIndex.webhooks.get(name);
+      const oldMethods = methodKeys(oldItem);
+      const newMethods = methodKeys(newItem);
+      for (const m of oldMethods.filter((m2) => newMethods.includes(m2))) {
+        diffOperationPair(ctx, name, m, oldItem, newItem, {
+          pointerPrefix: ["webhooks", name, m.toLowerCase()],
+          context: "webhook"
+        });
+      }
+    }
+  }
+  for (const name of ctx.currentIndex.webhooks.keys()) {
+    if (!ctx.baselineIndex.webhooks.has(name)) {
+      emit(ctx, {
+        ruleId: "webhook-added",
+        location: {
+          path: "",
+          pointerOld: "",
+          pointerNew: pointerJoin("webhooks", name),
+          context: "webhook"
+        },
+        newValue: name
+      });
+    }
+  }
+}
+function compact2(v) {
+  if (v === void 0 || v === null) return v;
+  if (typeof v !== "object") return v;
+  const json = JSON.stringify(v);
+  if (json === void 0 || json.length <= 80) return v;
+  return `${json.slice(0, 77)}\u2026`;
+}
+function runStructuralDiff(ctx) {
+  ctx.candidates = [];
+  diffDocumentLevel(ctx);
+  diffOperations(ctx);
+  diffComponents(ctx);
+  diffSecurity(ctx);
+  return ctx.candidates;
+}
+function diffComponents(ctx) {
+  const { baselineIndex: bi, currentIndex: ci } = ctx;
+  const usedOld = usedSchemas(ctx.baseline.normalized);
+  const usedNew = usedSchemas(ctx.current.normalized);
+  for (const name of bi.schemas.keys()) {
+    const oldSchema = bi.schemas.get(name);
+    const newSchema = ci.schemas.get(name);
+    if (!newSchema) continue;
+    if (!oldSchema) continue;
+    if (!usedOld.has(name) && !usedNew.has(name)) continue;
+    const usages = usageClasses(ctx, name);
+    const sideClass = usages.parse > 0 ? "parse" : "send";
+    const usageCount = usages.send + usages.parse;
+    const firstUsage = firstUsagePointer(ctx, name);
+    diffComponentSchema(ctx, name, oldSchema, newSchema, sideClass, usageCount, firstUsage);
+  }
+}
+function diffComponentSchema(ctx, name, oldSchema, newSchema, sideClass, usageCount, firstUsage) {
+  const base = {
+    context: "component",
+    path: "",
+    componentName: name
+  };
+  void firstUsage;
+  const view = sideClass === "send" ? "request" : "response";
+  const before = ctx.candidates.length;
+  diffSchemaNode(
+    ctx,
+    applyView(oldSchema, view),
+    applyView(newSchema, view),
+    pointerJoin("components", "schemas", name),
+    pointerJoin("components", "schemas", name),
+    base,
+    {
+      requiredOld: stringArrayOf2(applyView(oldSchema, view).required),
+      requiredNew: stringArrayOf2(applyView(newSchema, view).required),
+      sideClass
+    }
+  );
+  for (let i = before; i < ctx.candidates.length; i++) {
+    const c = ctx.candidates[i];
+    if (c !== void 0 && c.location.context === "component") {
+      c.location.usageCount = usageCount;
+    }
+  }
+}
+function stringArrayOf2(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+var VIEW_MAX_DEPTH = 512;
+function applyView(schema, view) {
+  const pruneKey = view === "request" ? "readOnly" : "writeOnly";
+  const visit = (node, depth) => {
+    if (depth > VIEW_MAX_DEPTH) return node;
+    const out = { ...node };
+    const props = isObject(out.properties) ? out.properties : void 0;
+    if (props) {
+      const kept = {};
+      for (const [name, child] of Object.entries(props)) {
+        const childObj = isObject(child) ? child : void 0;
+        if (childObj && childObj[pruneKey] === true) continue;
+        kept[name] = childObj ? visit(childObj, depth + 1) : child;
+      }
+      out.properties = kept;
+    }
+    if (Array.isArray(out.required)) {
+      out.required = out.required.filter((r) => {
+        if (typeof r !== "string") return true;
+        const prop = props?.[r];
+        const propObj = isObject(prop) ? prop : void 0;
+        return !(propObj && propObj[pruneKey] === true);
+      });
+    }
+    for (const key of ["items", "additionalProperties"]) {
+      const child = out[key];
+      const childObj = isObject(child) ? child : void 0;
+      if (childObj) out[key] = visit(childObj, depth + 1);
+    }
+    for (const key of ["allOf", "anyOf", "oneOf"]) {
+      if (Array.isArray(out[key])) {
+        out[key] = out[key].map((m) => {
+          const mObj = isObject(m) ? m : void 0;
+          return mObj ? visit(mObj, depth + 1) : m;
+        });
+      }
+    }
+    return out;
+  };
+  return visit(schema, 0);
+}
+function usedSchemas(document) {
+  const used = /* @__PURE__ */ new Set();
+  const stack = [document];
+  const seen = /* @__PURE__ */ new Set();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object") continue;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const v of node) stack.push(v);
+      continue;
+    }
+    const obj = node;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "$ref" && typeof v === "string") {
+        const m = v.match(/^#\/components\/schemas\/([^/]+)/);
+        if (m && m[1]) used.add(m[1].replace(/~1/g, "/").replace(/~0/g, "~"));
+      } else if (v !== null && typeof v === "object") {
+        stack.push(v);
+      }
+    }
+  }
+  return used;
+}
+function usageClasses(ctx, name) {
+  let send = 0;
+  let parse = 0;
+  const refPattern = new RegExp(`^#/components/schemas/${escapeRegExp(name)}$`);
+  const classifyUse = (doc) => {
+    const docObj = isObject(doc) ? doc : {};
+    const pathsObj = isObject(docObj.paths) ? docObj.paths : {};
+    for (const p of Object.keys(pathsObj).sort()) {
+      const item = isObject(pathsObj[p]) ? pathsObj[p] : {};
+      for (const method of Object.keys(item).sort()) {
+        if (!isHttpMethod(method)) continue;
+        const op = isObject(item[method]) ? item[method] : {};
+        countIn(op.requestBody, "send");
+        countIn(op.responses, "parse");
+        countIn(op.parameters, "send");
+        countIn(item.parameters, "send");
+      }
+    }
+    const webhooksObj = isObject(docObj.webhooks) ? docObj.webhooks : {};
+    for (const w of Object.keys(webhooksObj)) {
+      countIn(webhooksObj[w], "parse");
+    }
+  };
+  const countIn = (node, side) => {
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (n === null || typeof n !== "object") continue;
+      if (Array.isArray(n)) {
+        for (const v of n) stack.push(v);
+        continue;
+      }
+      const obj = n;
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === "$ref" && typeof v === "string" && refPattern.test(v)) {
+          if (side === "send") send++;
+          else parse++;
+        } else if (v !== null && typeof v === "object") {
+          stack.push(v);
+        }
+      }
+    }
+  };
+  classifyUse(ctx.baseline.normalized);
+  classifyUse(ctx.current.normalized);
+  return { send, parse };
+}
+function firstUsagePointer(ctx, name) {
+  const ref = `#/components/schemas/${name}`;
+  const findIn = (doc) => {
+    const docObj = isObject(doc) ? doc : {};
+    const pathsObj = isObject(docObj.paths) ? docObj.paths : {};
+    for (const p of Object.keys(pathsObj).sort()) {
+      const item = isObject(pathsObj[p]) ? pathsObj[p] : {};
+      const found = findRefIn(item, ref, pointerJoin("paths", p));
+      if (found) return found;
+    }
+    return "";
+  };
+  return findIn(ctx.current.normalized) || findIn(ctx.baseline.normalized);
+}
+function findRefIn(node, ref, pointer) {
+  const stack = [{ node, pointer }];
+  while (stack.length > 0) {
+    const { node: n, pointer: ptr } = stack.pop();
+    if (n === null || typeof n !== "object") continue;
+    if (Array.isArray(n)) {
+      n.forEach((v, i) => stack.push({ node: v, pointer: `${ptr}/${i}` }));
+      continue;
+    }
+    const obj = n;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "$ref" && v === ref) return ptr;
+      if (v !== null && typeof v === "object") {
+        stack.push({ node: v, pointer: `${ptr}/${k}` });
+      }
+    }
+  }
+  return "";
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function diffSecurity(ctx) {
+  const oldDoc = isObject(ctx.baseline.normalized) ? ctx.baseline.normalized : {};
+  const newDoc = isObject(ctx.current.normalized) ? ctx.current.normalized : {};
+  const oldComp = isObject(oldDoc.components) ? oldDoc.components : {};
+  const newComp = isObject(newDoc.components) ? newDoc.components : {};
+  const oldSchemes = isObject(oldComp.securitySchemes) ? oldComp.securitySchemes : {};
+  const newSchemes = isObject(newComp.securitySchemes) ? newComp.securitySchemes : {};
+  const oldGlobal = Array.isArray(oldDoc.security) ? oldDoc.security : [];
+  const newGlobal = Array.isArray(newDoc.security) ? newDoc.security : [];
+  const referencedOld = referencedSchemeNames(oldDoc);
+  const referencedNew = referencedSchemeNames(newDoc);
+  for (const name of Object.keys(oldSchemes).sort()) {
+    const oldScheme = isObject(oldSchemes[name]) ? oldSchemes[name] : {};
+    const newScheme = isObject(newSchemes[name]) ? newSchemes[name] : {};
+    if (!(name in newSchemes)) {
+      const wasReferenced = referencedOld.has(name);
+      emit(ctx, {
+        ruleId: "security-scheme-removed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin("components", "securitySchemes", name),
+          pointerNew: ""
+        },
+        oldValue: name,
+        severityOverride: wasReferenced ? "error" : "info"
+      });
+      continue;
+    }
+    const oldType = Array.isArray(oldScheme.type) ? oldScheme.type[0] : oldScheme.type;
+    const newType = Array.isArray(newScheme.type) ? newScheme.type[0] : newScheme.type;
+    if (!deepEqual(oldType, newType)) {
+      emit(ctx, {
+        ruleId: "security-type-changed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin("components", "securitySchemes", name, "type"),
+          pointerNew: pointerJoin("components", "securitySchemes", name, "type")
+        },
+        oldValue: oldType,
+        newValue: newType
+      });
+    }
+    if (oldType === "apiKey" && newType === "apiKey") {
+      if (!deepEqual(oldScheme.in, newScheme.in)) {
+        emit(ctx, {
+          ruleId: "api-key-location-changed",
+          location: {
+            context: "security",
+            path: "/",
+            pointerOld: pointerJoin("components", "securitySchemes", name, "in"),
+            pointerNew: pointerJoin("components", "securitySchemes", name, "in")
+          },
+          oldValue: oldScheme.in,
+          newValue: newScheme.in
+        });
+      }
+      if (!deepEqual(oldScheme.name, newScheme.name)) {
+        emit(ctx, {
+          ruleId: "api-key-location-changed",
+          location: {
+            context: "security",
+            path: "/",
+            pointerOld: pointerJoin("components", "securitySchemes", name, "name"),
+            pointerNew: pointerJoin("components", "securitySchemes", name, "name")
+          },
+          oldValue: oldScheme.name,
+          newValue: newScheme.name
+        });
+      }
+    }
+    if (oldType === "http" && newType === "http" && !deepEqual(oldScheme.scheme, newScheme.scheme)) {
+      emit(ctx, {
+        ruleId: "security-type-changed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin("components", "securitySchemes", name, "scheme"),
+          pointerNew: pointerJoin("components", "securitySchemes", name, "scheme")
+        },
+        oldValue: oldScheme.scheme,
+        newValue: newScheme.scheme
+      });
+    }
+    if (oldType === "openIdConnect" && newType === "openIdConnect" && !deepEqual(oldScheme.openIdConnectUrl, newScheme.openIdConnectUrl)) {
+      emit(ctx, {
+        ruleId: "security-type-changed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin("components", "securitySchemes", name, "openIdConnectUrl"),
+          pointerNew: pointerJoin("components", "securitySchemes", name, "openIdConnectUrl")
+        },
+        oldValue: oldScheme.openIdConnectUrl,
+        newValue: newScheme.openIdConnectUrl
+      });
+    }
+    diffOauthScopes(ctx, name, oldScheme, newScheme, referencedOld, referencedNew);
+  }
+  for (const name of Object.keys(newSchemes).sort()) {
+    if (name in oldSchemes) continue;
+    emit(ctx, {
+      ruleId: "security-scheme-added",
+      location: {
+        context: "security",
+        path: "/",
+        pointerOld: "",
+        pointerNew: pointerJoin("components", "securitySchemes", name)
+      },
+      newValue: name
+    });
+  }
+  diffSecurityRequirements(ctx, oldDoc, newDoc, oldGlobal, newGlobal, oldSchemes, newSchemes);
+}
+function diffOauthScopes(ctx, name, oldScheme, newScheme, referencedOld, referencedNew) {
+  const oldFlows = isObject(oldScheme.flows) ? oldScheme.flows : {};
+  const newFlows = isObject(newScheme.flows) ? newScheme.flows : {};
+  for (const flow of Object.keys(oldFlows).sort()) {
+    const oldFlow = isObject(oldFlows[flow]) ? oldFlows[flow] : {};
+    const newFlow = isObject(newFlows[flow]) ? newFlows[flow] : {};
+    const oldScopes = isObject(oldFlow.scopes) ? oldFlow.scopes : {};
+    const newScopes = isObject(newFlow.scopes) ? newFlow.scopes : {};
+    for (const scope of Object.keys(oldScopes).sort()) {
+      if (scope in newScopes) continue;
+      const stillUsed = referencedNew.has(name);
+      emit(ctx, {
+        ruleId: "oauth-scope-removed",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: pointerJoin(
+            "components",
+            "securitySchemes",
+            name,
+            "flows",
+            flow,
+            "scopes",
+            scope
+          ),
+          pointerNew: ""
+        },
+        oldValue: scope,
+        severityOverride: stillUsed ? void 0 : "info"
+      });
+    }
+    for (const scope of Object.keys(newScopes).sort()) {
+      if (scope in oldScopes) continue;
+      emit(ctx, {
+        ruleId: "oauth-scope-added",
+        location: {
+          context: "security",
+          path: "/",
+          pointerOld: "",
+          pointerNew: pointerJoin(
+            "components",
+            "securitySchemes",
+            name,
+            "flows",
+            flow,
+            "scopes",
+            scope
+          )
+        },
+        newValue: scope
+      });
+    }
+  }
+  void referencedOld;
+}
+function referencedSchemeNames(doc) {
+  const names = /* @__PURE__ */ new Set();
+  const collect = (reqs) => {
+    if (!Array.isArray(reqs)) return;
+    for (const req of reqs) {
+      if (isObject(req)) for (const n of Object.keys(req)) names.add(n);
+    }
+  };
+  collect(doc.security);
+  const pathsObj = isObject(doc.paths) ? doc.paths : {};
+  for (const p of Object.keys(pathsObj)) {
+    const item = isObject(pathsObj[p]) ? pathsObj[p] : {};
+    collect(item.security);
+    for (const m of Object.keys(item)) {
+      if (!isHttpMethod(m)) continue;
+      const op = isObject(item[m]) ? item[m] : {};
+      collect(op.security);
+    }
+  }
+  return names;
+}
+function isNoSecurity(v) {
+  return Array.isArray(v) && v.length === 1 && isObject(v[0]) && Object.keys(v[0]).length === 0;
+}
+function diffSecurityRequirements(ctx, oldDoc, newDoc, oldGlobal, newGlobal, oldSchemes, newSchemes) {
+  void oldSchemes;
+  void newSchemes;
+  void oldDoc;
+  void newDoc;
+  const effectiveOld = (op, item) => op.security !== void 0 ? safeArray(op.security) : item.security !== void 0 ? safeArray(item.security) : oldGlobal;
+  const effectiveNew = (op, item) => op.security !== void 0 ? safeArray(op.security) : item.security !== void 0 ? safeArray(item.security) : newGlobal;
+  const walk = (doc, other, side) => {
+    const pathsObj = isObject(doc.paths) ? doc.paths : {};
+    const otherPaths = isObject(other.paths) ? other.paths : {};
+    for (const p of Object.keys(pathsObj).sort()) {
+      const item = isObject(pathsObj[p]) ? pathsObj[p] : {};
+      const otherItem = isObject(otherPaths[p]) ? otherPaths[p] : {};
+      for (const m of Object.keys(item).sort()) {
+        if (!isHttpMethod(m)) continue;
+        const op = isObject(item[m]) ? item[m] : {};
+        const otherOp = isObject(otherItem[m]) ? otherItem[m] : {};
+        const reqs = side === "old" ? effectiveOld(op, item) : effectiveNew(op, item);
+        const otherReqs = side === "old" ? effectiveNew(otherOp, otherItem) : effectiveOld(otherOp, otherItem);
+        if (side === "old") {
+          compareSecurity(ctx, p, m, reqs, otherReqs);
+        }
+      }
+    }
+  };
+  walk(ctx.baseline.normalized, ctx.current.normalized, "old");
+  void newDoc;
+}
+function safeArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+function compareSecurity(ctx, path4, method, oldReqs, newReqs) {
+  const oldEmpty = oldReqs.length === 0 || oldReqs.every(isNoSecurity);
+  const newEmpty = newReqs.length === 0 || newReqs.every(isNoSecurity);
+  if (!oldEmpty && newEmpty) {
+    emit(ctx, {
+      ruleId: "security-requirement-removed",
+      location: {
+        context: "security",
+        path: path4,
+        method,
+        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+      }
+    });
+    return;
+  }
+  if (oldEmpty && !newEmpty) {
+    emit(ctx, {
+      ruleId: "security-requirement-added",
+      location: {
+        context: "security",
+        path: path4,
+        method,
+        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+      }
+    });
+    return;
+  }
+  if (oldEmpty && newEmpty) return;
+  const oldSatisfied = oldReqs.every((oldReq) => satisfiesAny(oldReq, newReqs));
+  if (!oldSatisfied) {
+    emit(ctx, {
+      ruleId: "security-requirement-changed",
+      location: {
+        context: "security",
+        path: path4,
+        method,
+        pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
+        pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+      },
+      oldValue: compact2(oldReqs),
+      newValue: compact2(newReqs)
+    });
+  } else {
+    for (const oldReq of oldReqs) {
+      if (!isObject(oldReq)) continue;
+      for (const [scheme, scopes] of Object.entries(oldReq)) {
+        const scopeList = Array.isArray(scopes) ? scopes : [];
+        for (const newReq of newReqs) {
+          if (!isObject(newReq)) continue;
+          if (!(scheme in newReq)) continue;
+          const newScopes = Array.isArray(newReq[scheme]) ? newReq[scheme] : [];
+          for (const s of scopeList) {
+            if (!newScopes.includes(s)) {
+              emit(ctx, {
+                ruleId: "security-scope-required-removed",
+                location: {
+                  context: "security",
+                  path: path4,
+                  method,
+                  pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
+                  pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+                },
+                oldValue: s
+              });
+            }
+          }
+          for (const s of newScopes) {
+            if (!scopeList.includes(s)) {
+              emit(ctx, {
+                ruleId: "security-scope-required-added",
+                location: {
+                  context: "security",
+                  path: path4,
+                  method,
+                  pointerOld: pointerJoin("paths", path4, method.toLowerCase(), "security"),
+                  pointerNew: pointerJoin("paths", path4, method.toLowerCase(), "security")
+                },
+                newValue: s
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+}
+function satisfiesAny(oldReq, newReqs) {
+  if (!isObject(oldReq)) return true;
+  return newReqs.some((newReq) => {
+    if (!isObject(newReq)) return false;
+    for (const [scheme, scopes] of Object.entries(oldReq)) {
+      if (!(scheme in newReq)) continue;
+      const oldScopes = Array.isArray(scopes) ? scopes : [];
+      const newScopes = Array.isArray(newReq[scheme]) ? newReq[scheme] : [];
+      if (newScopes.every((s) => oldScopes.includes(s))) return true;
+    }
+    return false;
+  });
+}
+
+// src/utils/source-map.ts
+import { parseDocument, LineCounter } from "yaml";
+var SpecSourceMap = class {
+  doc;
+  lineCounter;
+  constructor(rawText) {
+    this.lineCounter = new LineCounter();
+    this.doc = parseDocument(rawText, { lineCounter: this.lineCounter });
+  }
+  /** Resolve 1-based line & column for a JSON pointer. */
+  findPosition(pointer) {
+    if (!pointer || pointer === "/") {
+      return { line: 1, column: 1 };
+    }
+    const tokens = pointer.split("/").filter(Boolean).map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+    for (let i = tokens.length; i >= 1; i--) {
+      const subTokens = tokens.slice(0, i);
+      try {
+        const node = this.doc.getIn(subTokens, true);
+        if (node && Array.isArray(node.range) && typeof node.range[0] === "number") {
+          const pos = this.lineCounter.linePos(node.range[0]);
+          return { line: pos.line, column: pos.col };
+        }
+      } catch {
+      }
+    }
+    return void 0;
+  }
+};
+function attachSourceLocations(changes, baselineSpec, currentSpec) {
+  let currentMap;
+  let baselineMap;
+  if (currentSpec.rawText) {
+    try {
+      currentMap = new SpecSourceMap(currentSpec.rawText);
+    } catch {
+    }
+  }
+  if (baselineSpec.rawText) {
+    try {
+      baselineMap = new SpecSourceMap(baselineSpec.rawText);
+    } catch {
+    }
+  }
+  for (const c of changes) {
+    if (currentMap && c.location.pointerNew) {
+      const pos = currentMap.findPosition(c.location.pointerNew);
+      if (pos) {
+        c.location.file = currentSpec.source;
+        c.location.line = pos.line;
+        c.location.column = pos.column;
+        continue;
+      }
+    }
+    if (baselineMap && c.location.pointerOld) {
+      const pos = baselineMap.findPosition(c.location.pointerOld);
+      if (pos) {
+        c.location.file = baselineSpec.source;
+        c.location.line = pos.line;
+        c.location.column = pos.column;
+      }
+    }
+  }
+}
+
+// src/core/ignore/ignore.ts
+import micromatch from "micromatch";
+function changePath(change) {
+  return change.location.path ?? "";
+}
+function isIgnored(change, config) {
+  const ignore = config.ignore;
+  if (ignore.changes.length > 0) {
+    if (micromatch.isMatch(change.ruleId, ignore.changes, { nocase: false })) return true;
+  }
+  const path4 = changePath(change);
+  if (ignore.schemas.length > 0) {
+    const name = change.location.componentName;
+    if (name && micromatch.isMatch(name, ignore.schemas)) return true;
+    const pointer = (change.location.pointerNew || change.location.pointerOld || "").replace(
+      /^#\//,
+      ""
+    );
+    const SCHEMAS_SEG = "components/schemas/";
+    if (pointer && (pointer.includes(`/${SCHEMAS_SEG}`) || pointer.startsWith(SCHEMAS_SEG))) {
+      const after = pointer.split(SCHEMAS_SEG)[1] ?? "";
+      const rootName = after.split("/")[0]?.replace(/~1/g, "/");
+      if (rootName) {
+        if (micromatch.isMatch(rootName, ignore.schemas)) return true;
+        const lastSegments = ignore.schemas.map((s) => s.split("/").pop() ?? s);
+        if (micromatch.isMatch(rootName, lastSegments)) return true;
+        const prefixGlobs = ignore.schemas.map((s) => `components/schemas/${s}**`);
+        if (micromatch.isMatch(pointer, prefixGlobs)) return true;
+      }
+    }
+  }
+  if (ignore.operations.length > 0 && change.location.method !== void 0) {
+    const opKey = `${change.location.method.toUpperCase()} ${path4}`;
+    if (ignore.operations.includes(opKey)) return true;
+  }
+  if (ignore.paths.length > 0 && path4 && path4 !== "") {
+    if (micromatch.isMatch(path4, ignore.paths)) return true;
+  }
+  return false;
+}
+function applyIgnores(changes, config) {
+  const kept = [];
+  const ignored = [];
+  for (const c of changes) {
+    if (isIgnored(c, config)) ignored.push(c);
+    else kept.push(c);
+  }
+  return { kept, ignored };
+}
+
+// src/core/engine/analyze.ts
+function summarize(changes, ignoredCount) {
+  const summary = {
+    total: changes.length,
+    bySeverity: { error: 0, warning: 0, info: 0 },
+    byKind: { addition: 0, removal: 0, modification: 0, relaxation: 0, documentation: 0 },
+    ignored: ignoredCount
+  };
+  for (const c of changes) {
+    summary.bySeverity[c.severity]++;
+    summary.byKind[c.kind]++;
+  }
+  return summary;
+}
+function metaOf(spec) {
+  return {
+    source: spec.source,
+    openapiVersion: spec.openapiVersion,
+    title: spec.title,
+    sha256: spec.sha256
+  };
+}
+async function analyze(baselinePath, currentPath, options = {}) {
+  const loaded = options.config ? { config: options.config, sourcePath: "", warnings: [] } : discoverAndLoadConfig({ explicit: options.configPath });
+  const config = loaded.config;
+  const [baseline, current] = await Promise.all([
+    loadSpec(baselinePath, { loader: config.loader }),
+    loadSpec(currentPath, { loader: config.loader })
+  ]);
+  structuralDeref(baseline.normalized);
+  structuralDeref(current.normalized);
+  const ctx = {
+    baseline,
+    current,
+    baselineIndex: buildSpecIndex(baseline.normalized),
+    currentIndex: buildSpecIndex(current.normalized),
+    config,
+    candidates: []
+  };
+  runStructuralDiff(ctx);
+  const deduped = dedupeChanges(sortChanges([...ctx.candidates]));
+  attachSourceLocations(deduped, baseline, current);
+  const { kept, ignored } = applyIgnores(deduped, config);
+  const summary = summarize(kept, ignored.length);
+  const semver = suggestVersion(kept);
+  const report = {
+    schemaVersion: "1.0",
+    tool: { name: "apiguard", version: TOOL_VERSION },
+    baseline: metaOf(baseline),
+    current: metaOf(current),
+    summary,
+    changes: kept,
+    semver
+  };
+  if (options.showIgnored && ignored.length > 0) {
+    report.ignored = ignored.map((c) => ({ ...c, ignored: true }));
+  }
+  return { report, ignored };
+}
+
+// src/reporters/html.ts
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function endpointOf(change) {
+  const loc = change.location;
+  if (loc.method && loc.path) return `${loc.method} ${loc.path}`;
+  if (loc.path && loc.path !== "/") return loc.path;
+  if (loc.context === "webhook") return `webhook ${loc.componentName ?? ""}`.trim();
+  if (loc.componentName) return `component ${loc.componentName}`;
+  return "API Root";
+}
+function valueRepr(v) {
+  if (v === void 0) return "absent";
+  if (v === null) return "null";
+  if (typeof v === "string") return v;
+  return JSON.stringify(v);
+}
+function renderHtml(report) {
+  const breaking = report.summary.bySeverity.error;
+  const warnings = report.summary.bySeverity.warning;
+  const infos = report.summary.bySeverity.info;
+  const total = report.summary.total;
+  const isPass = breaking === 0;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Guard Report - ${isPass ? "Passed" : "Breaking Changes Found"}</title>
+  <style>
+    /* Hallmark stamp: modern-minimal developer tool contract dashboard */
+    :root {
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-input: #ffffff;
+      --border-subtle: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --color-pass: #059669;
+      --color-pass-bg: #ecfdf5;
+      --color-pass-border: #a7f3d0;
+      --color-fail: #dc2626;
+      --color-fail-bg: #fef2f2;
+      --color-fail-border: #fecaca;
+      --color-warn: #d97706;
+      --color-warn-bg: #fffbeb;
+      --color-warn-border: #fde68a;
+      --color-info: #0284c7;
+      --color-info-bg: #f0f9ff;
+      --color-info-border: #bae6fd;
+      --color-accent: #2563eb;
+      --color-accent-bg: #eff6ff;
+      --focus-ring: #3b82f6;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-page: #090d16;
+        --bg-card: #131b2e;
+        --bg-input: #1a243b;
+        --border-subtle: #1e293b;
+        --border-strong: #334155;
+        --text-main: #f1f5f9;
+        --text-muted: #94a3b8;
+        --color-pass: #10b981;
+        --color-pass-bg: #064e3b33;
+        --color-pass-border: #065f46;
+        --color-fail: #f87171;
+        --color-fail-bg: #7f1d1d33;
+        --color-fail-border: #991b1b;
+        --color-warn: #fbbf24;
+        --color-warn-bg: #78350f33;
+        --color-warn-border: #92400e;
+        --color-info: #38bdf8;
+        --color-info-bg: #0c4a6e33;
+        --color-info-border: #075985;
+        --color-accent: #60a5fa;
+        --color-accent-bg: #1e3a8a33;
+        --focus-ring: #60a5fa;
+      }
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow-x: clip;
+      background: var(--bg-page);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    *:focus-visible {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 5rem 1.5rem;
+    }
+
+    .header {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.75rem 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .brand-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.825rem;
+      font-weight: 600;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      border: 1px solid;
+    }
+
+    .status-badge.pass {
+      background: var(--color-pass-bg);
+      color: var(--color-pass);
+      border-color: var(--color-pass-border);
+    }
+
+    .status-badge.fail {
+      background: var(--color-fail-bg);
+      color: var(--color-fail);
+      border-color: var(--color-fail-border);
+    }
+
+    .spec-metadata {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .meta-box strong {
+      color: var(--text-main);
+      display: block;
+      margin-bottom: 0.2rem;
+    }
+
+    .meta-code {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stat-card.error .stat-value { color: var(--color-fail); }
+    .stat-card.warning .stat-value { color: var(--color-warn); }
+    .stat-card.info .stat-value { color: var(--color-info); }
+    .stat-card.total .stat-value { color: var(--text-main); }
+
+    .semver-banner {
+      background: var(--color-accent-bg);
+      border: 1px solid var(--border-subtle);
+      border-left: 4px solid var(--color-accent);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+    }
+
+    .semver-banner strong {
+      color: var(--text-main);
+    }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .search-input {
+      flex: 1 1 260px;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.9rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--bg-input);
+      color: var(--text-main);
+    }
+
+    .filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .filter-btn {
+      padding: 0.45rem 0.85rem;
+      font-size: 0.825rem;
+      font-weight: 500;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--bg-card);
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .filter-btn.active {
+      background: var(--color-accent);
+      color: #ffffff;
+      border-color: var(--color-accent);
+    }
+
+    .changes-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .change-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .change-card.error { border-left: 4px solid var(--color-fail); }
+    .change-card.warning { border-left: 4px solid var(--color-warn); }
+    .change-card.info { border-left: 4px solid var(--color-info); }
+
+    .change-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .change-title-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .severity-tag {
+      font-size: 0.725rem;
+      font-weight: 700;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .severity-tag.error { background: var(--color-fail-bg); color: var(--color-fail); border: 1px solid var(--color-fail-border); }
+    .severity-tag.warning { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid var(--color-warn-border); }
+    .severity-tag.info { background: var(--color-info-bg); color: var(--color-info); border: 1px solid var(--color-info-border); }
+
+    .rule-name {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .endpoint-pill {
+      font-family: var(--font-mono);
+      font-size: 0.825rem;
+      color: var(--text-muted);
+      background: var(--bg-page);
+      border: 1px solid var(--border-subtle);
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+    }
+
+    .location-info {
+      font-family: var(--font-mono);
+      font-size: 0.775rem;
+      color: var(--text-muted);
+    }
+
+    .change-message {
+      font-size: 0.95rem;
+      margin: 0 0 0.75rem 0;
+      color: var(--text-main);
+      word-break: break-word;
+    }
+
+    .suggestion-box {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      background: var(--bg-page);
+      border-radius: 6px;
+      padding: 0.6rem 0.9rem;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .suggestion-box strong {
+      color: var(--text-main);
+    }
+
+    .diff-values {
+      margin-top: 0.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
+    .val-block {
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      background: var(--bg-page);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-muted);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-top">
+        <div class="title-row">
+          <h1 class="brand-title">API Guard Diff Report</h1>
+          <span class="status-badge ${isPass ? "pass" : "fail"}">
+            ${isPass ? "PASS: No Breaking Changes" : "FAIL: Breaking Changes Detected"}
+          </span>
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">
+          Generated by apiguard ${esc(report.tool.version)}
+        </div>
+      </div>
+      <div class="spec-metadata">
+        <div class="meta-box">
+          <strong>Baseline Specification</strong>
+          <div>${esc(report.baseline.title || report.baseline.source)}</div>
+          <div class="meta-code">SHA: ${esc(report.baseline.sha256.slice(0, 16))} (${esc(report.baseline.openapiVersion)})</div>
+        </div>
+        <div class="meta-box">
+          <strong>Current Specification</strong>
+          <div>${esc(report.current.title || report.current.source)}</div>
+          <div class="meta-code">SHA: ${esc(report.current.sha256.slice(0, 16))} (${esc(report.current.openapiVersion)})</div>
+        </div>
+      </div>
+    </header>
+
+    <section class="stats-row">
+      <div class="stat-card error">
+        <div class="stat-label">Breaking Errors</div>
+        <div class="stat-value">${breaking}</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label">Warnings</div>
+        <div class="stat-value">${warnings}</div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-label">Informational</div>
+        <div class="stat-value">${infos}</div>
+      </div>
+      <div class="stat-card total">
+        <div class="stat-label">Total Changes</div>
+        <div class="stat-value">${total}</div>
+      </div>
+    </section>
+
+    <div class="semver-banner">
+      <strong>Suggested Version Bump:</strong> ${esc(report.semver?.bump ? report.semver.bump.toUpperCase() : "NONE")} &mdash; ${esc(report.semver?.reason ?? "No bump suggested")}
+    </div>
+
+    <section class="controls-bar">
+      <input type="search" id="searchInput" class="search-input" placeholder="Search by rule, path, or message..." aria-label="Search changes">
+      <div class="filter-group">
+        <button class="filter-btn active" data-severity="all">All (${total})</button>
+        <button class="filter-btn" data-severity="error">Errors (${breaking})</button>
+        <button class="filter-btn" data-severity="warning">Warnings (${warnings})</button>
+        <button class="filter-btn" data-severity="info">Info (${infos})</button>
+      </div>
+    </section>
+
+    <main class="changes-list" id="changesContainer">
+      ${report.changes.length === 0 ? `<div class="empty-state"><h3>No contract changes detected</h3><p>The current specification is fully compatible with the baseline.</p></div>` : report.changes.map((c) => {
+    const ep = endpointOf(c);
+    const locStr = c.location.file && c.location.line ? `${c.location.file}:${c.location.line}:${c.location.column ?? 1}` : c.location.pointerNew || c.location.pointerOld;
+    const hasDiff = c.oldValue !== void 0 || c.newValue !== void 0;
+    return `
+        <article class="change-card ${c.severity}" data-severity="${c.severity}" data-search="${esc(`${c.ruleId} ${ep} ${c.message} ${locStr}`).toLowerCase()}">
+          <div class="change-header">
+            <div class="change-title-group">
+              <span class="severity-tag ${c.severity}">${c.severity}</span>
+              <span class="rule-name">${esc(c.ruleId)}</span>
+              <span class="endpoint-pill">${esc(ep)}</span>
+            </div>
+            <div class="location-info">${esc(locStr)}</div>
+          </div>
+          <p class="change-message">${esc(c.message)}</p>
+          <div class="suggestion-box">
+            <strong>Suggestion:</strong> ${esc(c.suggestion)}
+          </div>
+          ${hasDiff ? `<div class="diff-values">
+            ${c.oldValue !== void 0 ? `<div class="val-block">Old: <code>${esc(valueRepr(c.oldValue))}</code></div>` : ""}
+            ${c.newValue !== void 0 ? `<div class="val-block">New: <code>${esc(valueRepr(c.newValue))}</code></div>` : ""}
+          </div>` : ""}
+        </article>`;
+  }).join("\n")}
+    </main>
+  </div>
+
+  <script>
+    (function() {
+      const searchInput = document.getElementById('searchInput');
+      const filterBtns = document.querySelectorAll('.filter-btn');
+      const cards = document.querySelectorAll('.change-card');
+      let currentSeverity = 'all';
+      let currentQuery = '';
+
+      function applyFilters() {
+        cards.forEach(card => {
+          const sev = card.getAttribute('data-severity');
+          const searchData = card.getAttribute('data-search') || '';
+          const matchesSev = (currentSeverity === 'all' || sev === currentSeverity);
+          const matchesQuery = (!currentQuery || searchData.includes(currentQuery));
+          card.style.display = (matchesSev && matchesQuery) ? '' : 'none';
+        });
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('input', e => {
+          currentQuery = e.target.value.trim().toLowerCase();
+          applyFilters();
+        });
+      }
+
+      filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          filterBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentSeverity = btn.getAttribute('data-severity') || 'all';
+          applyFilters();
+        });
+      });
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+// src/reporters/sarif.ts
+import path3 from "path";
+function sarifLevel(severity) {
+  switch (severity) {
+    case "error":
+      return "error";
+    case "warning":
+      return "warning";
+    case "info":
+      return "note";
+  }
+}
+function renderSarif(report) {
+  const rules = getAllRules().map((r) => ({
+    id: r.id,
+    shortDescription: { text: r.id },
+    fullDescription: { text: r.trigger },
+    defaultConfiguration: {
+      level: sarifLevel(r.defaultSeverity)
+    },
+    help: {
+      text: `${r.trigger}
+Suggestion: ${r.suggestion({ location: { path: "/", pointerOld: "", pointerNew: "", context: "api" } })}`,
+      markdown: `**Trigger:** ${r.trigger}
+
+[API Guard Rule Reference](https://github.com/subhamxaura/apiguard/blob/main/docs/rules.md#${r.id})`
+    },
+    properties: {
+      tags: ["api-contract", "openapi", "breaking-change", ...r.contexts]
+    }
+  }));
+  const results = report.changes.map((c) => {
+    const rawPath = c.location.file || report.current.source;
+    const rel = path3.isAbsolute(rawPath) ? path3.relative(process.cwd(), rawPath) : rawPath;
+    let fileUri = rel.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+    if (!fileUri || fileUri === ".") {
+      fileUri = path3.basename(report.current.source) || "openapi.yaml";
+    }
+    const line = c.location.line && c.location.line > 0 ? c.location.line : 1;
+    const col = c.location.column && c.location.column > 0 ? c.location.column : 1;
+    return {
+      ruleId: c.ruleId,
+      level: sarifLevel(c.severity),
+      message: {
+        text: `${c.message}. Suggestion: ${c.suggestion}`
+      },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: {
+              uri: fileUri,
+              uriBaseId: "%SRCROOT%"
+            },
+            region: {
+              startLine: line,
+              startColumn: col
+            }
+          }
+        }
+      ],
+      properties: {
+        kind: c.kind,
+        breaking: c.breaking,
+        context: c.location.context,
+        path: c.location.path,
+        method: c.location.method
+      }
+    };
+  });
+  const sarifLog = {
+    $schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "apiguard",
+            version: report.tool.version,
+            informationUri: "https://github.com/subhamxaura/apiguard",
+            rules
+          }
+        },
+        results
+      }
+    ]
+  };
+  return JSON.stringify(sarifLog, null, 2);
+}
+
+// src/reporters/changelog.ts
+function endpointOf2(change) {
+  const loc = change.location;
+  if (loc.method && loc.path) return `\`${loc.method} ${loc.path}\``;
+  if (loc.path && loc.path !== "/") return `\`${loc.path}\``;
+  if (loc.componentName) return `component \`${loc.componentName}\``;
+  return "API";
+}
+function renderChangelog(report) {
+  const lines = [];
+  const bump = report.semver?.bump ?? "none";
+  const version = bump === "none" ? "Current Release (No version bump)" : `Next Release (Recommended bump: ${bump.toUpperCase()})`;
+  lines.push(`## ${version}`);
+  lines.push("");
+  const breaking = report.changes.filter((c) => c.severity === "error");
+  const additions = report.changes.filter((c) => c.severity !== "error" && c.kind === "addition");
+  const modifications = report.changes.filter(
+    (c) => c.severity !== "error" && c.kind === "modification"
+  );
+  const relaxations = report.changes.filter(
+    (c) => c.severity !== "error" && (c.kind === "relaxation" || c.kind === "documentation")
+  );
+  if (breaking.length > 0) {
+    lines.push("### \u{1F6D1} Breaking Changes");
+    lines.push("");
+    for (const c of breaking) {
+      lines.push(`- **${endpointOf2(c)}**: ${c.message} (\`${c.ruleId}\`)`);
+      lines.push(`  *Suggestion: ${c.suggestion}*`);
+    }
+    lines.push("");
+  }
+  if (additions.length > 0) {
+    lines.push("### \u{1F680} Added");
+    lines.push("");
+    for (const c of additions) {
+      lines.push(`- **${endpointOf2(c)}**: ${c.message}`);
+    }
+    lines.push("");
+  }
+  if (modifications.length > 0) {
+    lines.push("### \u{1F504} Changed");
+    lines.push("");
+    for (const c of modifications) {
+      lines.push(`- **${endpointOf2(c)}**: ${c.message}`);
+    }
+    lines.push("");
+  }
+  if (relaxations.length > 0) {
+    lines.push("### \u2139\uFE0F Other Improvements");
+    lines.push("");
+    for (const c of relaxations) {
+      lines.push(`- **${endpointOf2(c)}**: ${c.message}`);
+    }
+    lines.push("");
+  }
+  if (report.changes.length === 0) {
+    lines.push("No functional contract changes detected between specifications.");
+  }
+  return lines.join("\n").trim();
+}
+
+// src/codegen/shim.ts
+function generateExpressShim(report) {
+  const breaking = report.changes.filter((c) => c.severity === "error");
+  const pathRewrites = [];
+  const paramDefaults = [];
+  for (const c of breaking) {
+    if ((c.ruleId === "removed-path" || c.ruleId === "removed-method" || c.ruleId === "operation-removed") && c.location.path) {
+      pathRewrites.push({ oldPath: c.location.path, method: c.location.method });
+    } else if (c.ruleId === "parameter-added-required" || c.ruleId === "parameter-made-required") {
+      const paramName = c.location.pointerNew.split("/").pop() || "param";
+      const defaultVal = c.newValue !== void 0 && c.newValue !== paramName ? c.newValue : "default";
+      paramDefaults.push({
+        method: c.location.method,
+        path: c.location.path,
+        param: paramName,
+        defaultVal
+      });
+    }
+  }
+  return `// Generated by API Guard (apiguard codegen-shim --target express)
+// Backward compatibility shim for baseline @ ${report.baseline.sha256.slice(0, 12)}
+import type { Request, Response, NextFunction } from 'express';
+
+export function apiGuardCompatibilityShim(req: Request, res: Response, next: NextFunction) {
+  const method = req.method.toUpperCase();
+  const path = req.path;
+
+  // 0. Removed paths and methods
+${pathRewrites.map(
+    (p) => `  if (${p.method ? `method === '${p.method}' && ` : ""}path === '${p.oldPath}') {
+    res.status(410).json({ error: 'Endpoint has been removed in newer API version' });
+    return;
+  }`
+  ).join("\n")}
+
+  // 1. Parameter defaults for newly required parameters
+${paramDefaults.map((p) => {
+    const basePrefix = p.path.split("{")[0];
+    return `  if (${p.method ? `method === '${p.method}' && ` : ""}(path === '${p.path}' || path.startsWith('${basePrefix}'))) {
+    if (req.query['${p.param}'] === undefined && (!req.body || req.body['${p.param}'] === undefined)) {
+      req.query['${p.param}'] = '${String(p.defaultVal)}';
+    }
+  }`;
+  }).join("\n")}
+
+  // 2. Response adapter interception
+  const originalJson = res.json;
+  res.json = function(body: any) {
+    // Intercept and maintain legacy schema structure
+    if (body && typeof body === 'object') {
+      // Compatibility mutations can be inserted here
+    }
+    return originalJson.call(this, body);
+  };
+
+  next();
+}
+`;
+}
+function generateCloudflareWorkerShim(report) {
+  const breaking = report.changes.filter((c) => c.severity === "error");
+  const pathRewrites = breaking.filter(
+    (c) => (c.ruleId === "removed-path" || c.ruleId === "removed-method" || c.ruleId === "operation-removed") && c.location.path
+  );
+  const paramDefaults = [];
+  for (const c of breaking) {
+    if (c.ruleId === "parameter-added-required" || c.ruleId === "parameter-made-required") {
+      const paramName = c.location.pointerNew.split("/").pop() || "param";
+      const defaultVal = c.newValue !== void 0 && c.newValue !== paramName ? c.newValue : "default";
+      paramDefaults.push({
+        method: c.location.method,
+        path: c.location.path,
+        param: paramName,
+        defaultVal
+      });
+    }
+  }
+  return `// Generated by API Guard (apiguard codegen-shim --target cloudflare-worker)
+// Edge backward-compatibility worker
+export default {
+  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+
+    // 0. Intercept removed paths
+${pathRewrites.map(
+    (c) => `    if (${c.location.method ? `method === '${c.location.method}' && ` : ""}url.pathname === '${c.location.path}') {
+      return new Response(JSON.stringify({ error: 'Endpoint removed' }), { status: 410, headers: { 'content-type': 'application/json' } });
+    }`
+  ).join("\n")}
+
+    // Clone request headers for mutation
+    const modifiedHeaders = new Headers(request.headers);
+
+    // 1. Parameter defaults for newly required parameters
+${paramDefaults.map((p) => {
+    const basePrefix = p.path.split("{")[0];
+    return `    if (${p.method ? `method === '${p.method}' && ` : ""}(url.pathname === '${p.path}' || url.pathname.startsWith('${basePrefix}'))) {
+      if (!url.searchParams.has('${p.param}')) {
+        url.searchParams.set('${p.param}', '${String(p.defaultVal)}');
+      }
+      if (!modifiedHeaders.has('${p.param}')) {
+        modifiedHeaders.set('${p.param}', '${String(p.defaultVal)}');
+      }
+    }`;
+  }).join("\n")}
+
+    // Track downstream upstream response
+    const response = await fetch(new Request(url.toString(), {
+      method: request.method,
+      headers: modifiedHeaders,
+      body: request.body,
+      redirect: 'manual'
+    }));
+
+    // Intercept JSON responses for schema backward compatibility
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const data = await response.json();
+        // ${breaking.length} breaking changes monitored
+        return new Response(JSON.stringify(data), {
+          status: response.status,
+          headers: response.headers
+        });
+      } catch {
+        // Pass through unmodified if not json
+      }
+    }
+
+    return response;
+  }
+};
+`;
+}
+function generateEnvoyLuaShim(report) {
+  return `-- Generated by API Guard (apiguard codegen-shim --target envoy-lua)
+-- Envoy Proxy Lua filter for API backward compatibility (baseline: ${report.baseline.sha256.slice(0, 12)})
+
+function envoy_on_request(request_handle)
+  local headers = request_handle:headers()
+  local path = headers:get(":path")
+  local method = headers:get(":method")
+
+  -- Check for API compatibility headers
+  if not headers:get("x-apiguard-shimmed") then
+    headers:add("x-apiguard-shimmed", "true")
+  end
+end
+
+function envoy_on_response(response_handle)
+  local headers = response_handle:headers()
+  headers:add("x-apiguard-adapter", "v1-compat")
+end
+`;
+}
+function generateGatewayShim(report, target = "express") {
+  const breaking = report.changes.filter((c) => c.severity === "error");
+  let code;
+  switch (target) {
+    case "express":
+      code = generateExpressShim(report);
+      break;
+    case "cloudflare-worker":
+      code = generateCloudflareWorkerShim(report);
+      break;
+    case "envoy-lua":
+      code = generateEnvoyLuaShim(report);
+      break;
+  }
+  return {
+    target,
+    code,
+    handledChanges: breaking.length
+  };
+}
+
+export {
+  ExitCode,
+  ApiguardError,
+  CliUsageError,
+  SpecValidationError,
+  errorMessage,
+  loadConfigFrom,
+  discoverAndLoadConfig,
+  mergeWithFlags,
+  loadSpec,
+  TOOL_VERSION,
+  validateSemantics,
+  formatIssues,
+  suggestVersion,
+  analyze,
+  renderHtml,
+  renderSarif,
+  renderChangelog,
+  generateGatewayShim
+};

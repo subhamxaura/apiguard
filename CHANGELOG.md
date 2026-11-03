@@ -1,3 +1,9 @@
+# [1.2.0](https://github.com/subhamxaura/apiguard/compare/v1.1.0...v1.2.0) (2026-11-03)
+
+### Features
+
+- harden diff soundness, fix action packaging collision, and add enterprise reporting ([8f34125](https://github.com/subhamxaura/apiguard/commit/8f3412563570bf53654f46f661f4d5b02232056a))
+
 # [1.1.0](https://github.com/subhamxaura/apiguard/compare/v1.0.4...v1.1.0) (2026-11-02)
 
 ### Features
